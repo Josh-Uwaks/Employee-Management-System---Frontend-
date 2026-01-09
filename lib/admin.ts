@@ -1,3 +1,4 @@
+// lib/admin.ts
 import api from "./api";
 
 /* =========================
@@ -42,6 +43,20 @@ export interface Employee {
   updatedAt?: string;
 }
 
+export interface DailyActivity {
+  _id: string;
+  user: Employee | string;
+  date: string;
+  timeInterval: string;
+  description: string;
+  status: 'pending' | 'ongoing' | 'completed';
+  category?: 'work' | 'meeting' | 'training' | 'break' | 'other';
+  priority?: 'low' | 'medium' | 'high';
+  duration?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface GetUsersResponse {
   success: boolean;
   status: number;
@@ -65,6 +80,41 @@ interface DepartmentsResponse {
   data: Department[];
 }
 
+interface ActivitiesResponse {
+  success: boolean;
+  status: number;
+  message: string;
+  count?: number;
+  data: DailyActivity[];
+  stats?: any;
+  dateRange?: {
+    start: string;
+    end: string;
+    days: number;
+  };
+  summary?: {
+    totalDuration: number;
+    statusCount: {
+      pending: number;
+      ongoing: number;
+      completed: number;
+    };
+  };
+  pagination?: {
+    page: number;
+    limit: number;
+    totalPages: number;
+    totalItems: number;
+  };
+}
+
+interface ActivityResponse {
+  success: boolean;
+  status: number;
+  message: string;
+  data: DailyActivity;
+}
+
 /* =========================
    User Management API Calls
 ========================= */
@@ -72,7 +122,6 @@ interface DepartmentsResponse {
 /**
  * Get all users (Admin only)
  */
-// Update getAllUsers to handle backend response:
 export const getAllUsers = async (): Promise<Employee[]> => {
   try {
     const res = await api.get("/users");
@@ -81,7 +130,6 @@ export const getAllUsers = async (): Promise<Employee[]> => {
       throw new Error(res.data.message || "Failed to fetch users");
     }
     
-    // Backend returns { success, status, message, data: users[] }
     return res.data.data || [];
   } catch (error: any) {
     console.error("getAllUsers error:", {
@@ -90,7 +138,6 @@ export const getAllUsers = async (): Promise<Employee[]> => {
       response: error?.response?.data,
     });
     
-    // Handle specific permission errors for LINE_MANAGER
     if (error?.response?.status === 403) {
       throw new Error("Insufficient permissions to view users");
     }
@@ -102,6 +149,7 @@ export const getAllUsers = async (): Promise<Employee[]> => {
     );
   }
 };
+
 /**
  * Get user by ID
  */
@@ -316,6 +364,91 @@ export const toggleDepartmentStatus = async (departmentId: string): Promise<Depa
 };
 
 /* =========================
+   Daily Activities API Calls (Admin)
+========================= */
+
+/**
+ * Get all activities (Admin only)
+ */
+export const getAllActivities = async (params?: {
+  date?: string;
+  status?: 'pending' | 'ongoing' | 'completed';
+  region?: string;
+  branch?: string;
+  page?: number;
+  limit?: number;
+}): Promise<ActivitiesResponse> => {
+  try {
+    const res = await api.get<ActivitiesResponse>('/activities/all', { params });
+    
+    if (!res.data.success) {
+      throw new Error(res.data.message || "Failed to fetch activities");
+    }
+    
+    return res.data;
+  } catch (error: any) {
+    console.error("getAllActivities error:", {
+      message: error?.message,
+      status: error?.response?.status,
+      response: error?.response?.data,
+    });
+    
+    const apiError: any = new Error(
+      error?.response?.data?.message ||
+      error?.message ||
+      "Failed to fetch activities"
+    );
+    
+    if (error?.response?.status === 403) {
+      apiError.error = 'INSUFFICIENT_PERMISSIONS';
+    } else if (error?.response?.status === 400) {
+      apiError.error = 'VALIDATION_ERROR';
+      apiError.details = error.response?.data?.details;
+    }
+    
+    throw apiError;
+  }
+};
+
+/**
+ * Get activities by user (Admin only)
+ */
+export const getActivitiesByUser = async (userId: string, params?: {
+  date?: string;
+  status?: 'pending' | 'ongoing' | 'completed';
+  page?: number;
+  limit?: number;
+}): Promise<ActivitiesResponse> => {
+  try {
+    const res = await api.get<ActivitiesResponse>(`/activities/user/${userId}`, { params });
+    
+    if (!res.data.success) {
+      throw new Error(res.data.message || "Failed to fetch user activities");
+    }
+    
+    return res.data;
+  } catch (error: any) {
+    console.error("getActivitiesByUser error:", error.response?.data || error.message);
+    
+    const apiError: any = new Error(
+      error?.response?.data?.message ||
+      error?.message ||
+      "Failed to fetch user activities"
+    );
+    
+    if (error?.response?.status === 403) {
+      apiError.error = 'INSUFFICIENT_PERMISSIONS';
+    } else if (error?.response?.status === 404) {
+      apiError.error = 'USER_NOT_FOUND';
+    } else if (error?.response?.status === 400) {
+      apiError.error = 'VALIDATION_ERROR';
+    }
+    
+    throw apiError;
+  }
+};
+
+/* =========================
    Export all functions
 ========================= */
 export const adminApi = {
@@ -328,4 +461,6 @@ export const adminApi = {
   updateDepartment,
   deleteDepartment,
   toggleDepartmentStatus,
+  getAllActivities,
+  getActivitiesByUser,
 };

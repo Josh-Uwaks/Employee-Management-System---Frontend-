@@ -13,12 +13,17 @@ import {
   ChevronLeft, 
   Menu,
   BarChart3,
-  LayoutDashboard
+  LayoutDashboard,
+  Activity,
+  LucideIcon
 } from "lucide-react"
+
+// Define the type for view items
+type ViewType = "overview" | "employees" | "activities" | "departments" | "locked" | "analytics"
 
 interface SidebarProps {
   sidebarOpen: boolean
-  activeView: "overview" | "employees" | "departments" | "locked" | "analytics"
+  activeView: ViewType
   userName: string
   userRole?: string
   stats: {
@@ -29,19 +34,20 @@ interface SidebarProps {
   }
   departmentsCount: number
   availableViews: {
-    id: string;
+    id: ViewType;
     label: string;
-    icon: React.ForwardRefExoticComponent<Omit<React.SVGProps<SVGSVGElement>, "ref"> & React.RefAttributes<SVGSVGElement>>;
+    icon: LucideIcon;
   }[]
   onToggleSidebar: () => void
-  onViewChange: (view: "overview" | "employees" | "departments" | "locked" | "analytics") => void
+  onViewChange: (view: ViewType) => void
   onLogout: () => void
 }
 
 // Default navigation items (used as fallback)
-const defaultNavigationItems = [
+const defaultNavigationItems: Array<{id: ViewType, icon: LucideIcon, label: string}> = [
   { id: "overview", icon: LayoutDashboard, label: "Overview" },
   { id: "employees", icon: Users, label: "Employee List" },
+  { id: "activities", icon: Activity, label: "Activities" },
   { id: "departments", icon: Building, label: "Departments" },
   { id: "locked", icon: ShieldAlert, label: "Locked Accounts" },
   { id: "analytics", icon: BarChart3, label: "Analytics" },
@@ -59,7 +65,7 @@ export default function Sidebar({
   onViewChange,
   onLogout,
 }: SidebarProps) {
-  const getItemCount = (id: string) => {
+  const getItemCount = (id: ViewType) => {
     switch (id) {
       case "employees": return stats.total
       case "departments": return departmentsCount
@@ -111,7 +117,7 @@ export default function Sidebar({
                 <Tooltip key={item.id} delayDuration={0}>
                   <TooltipTrigger asChild>
                     <button
-                      onClick={() => onViewChange(item.id as any)}
+                      onClick={() => onViewChange(item.id)}
                       className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group relative ${
                         isActive 
                           ? "bg-white text-red-600 shadow-sm ring-1 ring-slate-200" 

@@ -1,8 +1,9 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useCallback } from "react"
 import { useAuth } from "@/context/authContext"
 import { useAdmin } from "@/context/adminContext"
+import { useActivities } from "@/context/activitiesContext"
 import { Employee, Department } from "@/lib/admin"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -16,7 +17,8 @@ import {
   BarChart3, Building2, UserCog, UserX, LayoutDashboard,
   Shield, EyeOff, Filter, Search, UserCheck, XCircle,
   CheckCircle, Edit, Unlock, Mail, Calendar,
-  Building, MapPin, AlertTriangle, Package
+  Building, MapPin, AlertTriangle, Package,
+  LucideIcon
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -26,6 +28,7 @@ import Header from "@/components/admin/header"
 import EmployeeManagement from "@/components/admin/employeeManagement"
 import DepartmentManagement from "@/components/admin/departmentManagement"
 import LockedAccounts from "@/components/admin/lockedAccounts"
+import ActivitiesManagement from "@/components/activity/activitiesManagement"
 
 // Dialogs
 import EditUserDialog from "@/components/admin/dialogs/editUserDialog"
@@ -35,6 +38,7 @@ import CreateDepartmentDialog from "@/components/admin/dialogs/createDepartmentD
 import EditDepartmentDialog from "@/components/admin/dialogs/editDepartmentDialog"
 import DeleteDepartmentDialog from "@/components/admin/dialogs/deleteDepartmentDialog"
 import RegisterUserDialog from "@/components/admin/dialogs/registerUserDialog"
+import ActivityDetailsDialog from "@/components/activity/activityDetailsDialog"
 
 interface AdminDashboardProps {
   onLogout: () => void
@@ -44,6 +48,23 @@ interface DepartmentFormData {
   name: string;
   code: string;
   description: string;
+}
+
+// Define ViewItem type for sidebar navigation
+type ViewItem = {
+  id: "overview" | "employees" | "activities" | "departments" | "locked" | "analytics";
+  label: string;
+  icon: LucideIcon;
+};
+
+// Type for activities filters
+interface ActivitiesFilters {
+  date: string;
+  status: string;
+  region: string;
+  branch: string;
+  page: number;
+  limit: number;
 }
 
 export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
@@ -67,7 +88,18 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     toggleDepartmentStatus
   } = useAdmin()
 
-  const [activeView, setActiveView] = useState<"overview" | "employees" | "departments" | "locked" | "analytics">("overview")
+  const {
+    allActivities,
+    userActivities,
+    activitiesStats,
+    activitiesPagination,
+    adminActivitiesLoading,
+    adminActivitiesError,
+    loadAllActivities,
+    loadActivitiesByUser
+  } = useActivities()
+
+  const [activeView, setActiveView] = useState<"overview" | "employees" | "activities" | "departments" | "locked" | "analytics">("overview")
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [currentTime, setCurrentTime] = useState(new Date())
   const [searchQuery, setSearchQuery] = useState("")
@@ -78,9 +110,20 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   const [optimisticEmployees, setOptimisticEmployees] = useState<Employee[]>([])
   const [optimisticDepartments, setOptimisticDepartments] = useState<Department[]>([])
 
+  // Activities state
+  const [activitiesFilters, setActivitiesFilters] = useState<ActivitiesFilters>({
+    date: "",
+    status: "",
+    region: "",
+    branch: "",
+    page: 1,
+    limit: 20
+  })
+
   // Action Dialog States
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null)
   const [selectedDepartment, setSelectedDepartment] = useState<Department | null>(null)
+  const [selectedActivity, setSelectedActivity] = useState<any>(null)
   const [lockReason, setLockReason] = useState("")
   
   const [editFormData, setEditFormData] = useState<Partial<Employee>>({
@@ -103,17 +146,41 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     createDept: false,
     editDept: false,
     deleteDept: false,
-    register: false
+    register: false,
+    activityDetails: false
   })
 
   const userName = authUser ? `${authUser.first_name} ${authUser.last_name}` : "Administrator"
   const canRegisterUser = authUser?.role === "SUPER_ADMIN"
   const isLineManager = authUser?.role === "LINE_MANAGER"
   const isSuperAdmin = authUser?.role === "SUPER_ADMIN"
+  const isAdmin = Boolean(authUser?.isAdmin)
   
   // Use optimistic data when available, otherwise use fetched data
   const displayEmployees = optimisticEmployees.length > 0 ? optimisticEmployees : employees
   const displayDepartments = isSuperAdmin ? (optimisticDepartments.length > 0 ? optimisticDepartments : departments) : []
+  
+  // Get activities to display based on role
+  const getDisplayActivities = () => {
+    if (isLineManager) {
+      // LINE_MANAGER only sees activities of their direct reports
+      return allActivities.filter(activity => {
+        if (typeof activity.user === 'object') {
+          const report = displayEmployees.find(emp => 
+            emp._id === activity.user._id && 
+            emp.reportsTo && 
+            emp.reportsTo._id === authUser?._id
+          )
+          return !!report
+        }
+        return false
+      })
+    }
+    // SUPER_ADMIN sees all activities
+    return allActivities
+  }
+
+  const displayActivities = getDisplayActivities()
   
   // Role-based statistics - LINE_MANAGER should see stats for their direct reports only
   const stats = useMemo(() => {
@@ -161,11 +228,12 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     }
   }, [isLineManager, isSuperAdmin])
 
-  // Available views based on role
-  const availableViews = useMemo(() => {
-    const baseViews = [
+  // Available views based on role - properly typed
+  const availableViews = useMemo((): ViewItem[] => {
+    const baseViews: ViewItem[] = [
       { id: "overview", label: "Overview", icon: LayoutDashboard },
       { id: "employees", label: "Employees", icon: Users },
+      { id: "activities", label: "Activities", icon: Activity },
       { id: "locked", label: "Locked Accounts", icon: Lock }
     ];
     
@@ -176,19 +244,26 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     baseViews.push({ id: "analytics", label: "Analytics", icon: BarChart3 });
     
     return baseViews;
-  }, [isSuperAdmin]);
+  }, [isSuperAdmin])
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000)
     return () => clearInterval(timer)
   }, [])
 
+  // Load activities based on role and filters
+  useEffect(() => {
+    if (isAdmin && activeView === "activities") {
+      loadActivitiesData()
+    }
+  }, [isAdmin, activeView, activitiesFilters])
+
   /* -------------------- Helper Functions -------------------- */
   const toggleModal = (modalName: keyof typeof modals, isOpen: boolean) => {
     setModals(prev => ({ ...prev, [modalName]: isOpen }))
   }
 
-  const refetchData = async (type?: 'users' | 'departments' | 'all') => {
+  const refetchData = async (type?: 'users' | 'departments' | 'activities' | 'all') => {
     setIsRefetching(true)
     try {
       const promises = []
@@ -199,11 +274,16 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         if (isSuperAdmin) {
           promises.push(loadDepartments())
         }
+        if (activeView === 'activities') {
+          promises.push(loadActivitiesData())
+        }
       } else if (type === 'users') {
         promises.push(loadUsers())
         promises.push(loadLockedAccounts())
       } else if (type === 'departments' && isSuperAdmin) {
         promises.push(loadDepartments())
+      } else if (type === 'activities') {
+        promises.push(loadActivitiesData())
       }
       
       await Promise.all(promises)
@@ -212,6 +292,45 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       showToast.error("Failed to refresh data")
     } finally {
       setIsRefetching(false)
+    }
+  }
+
+  const loadActivitiesData = async (filters: ActivitiesFilters = activitiesFilters) => {
+    if (!isAdmin) return
+    
+    try {
+      // Create filtered params with proper typing
+      const filteredParams: any = {
+        date: filters.date || '',
+        status: filters.status === 'all' ? '' : filters.status,
+        region: filters.region || '',
+        branch: filters.branch || '',
+        page: filters.page,
+        limit: filters.limit
+      }
+
+      if (isLineManager) {
+        // LINE_MANAGER loads activities for their direct reports
+        const directReports = displayEmployees.filter(emp => 
+          emp.reportsTo && emp.reportsTo._id === authUser?._id
+        )
+        
+        // Load activities for each direct report
+        for (const report of directReports) {
+          await loadActivitiesByUser(report._id, {
+            date: filteredParams.date,
+            status: filteredParams.status,
+            page: filteredParams.page,
+            limit: filteredParams.limit
+          })
+        }
+      } else {
+        // SUPER_ADMIN loads all activities
+        await loadAllActivities(filteredParams)
+      }
+    } catch (error) {
+      console.error("Error loading activities:", error)
+      showToast.error("Failed to load activities")
     }
   }
 
@@ -476,6 +595,69 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     }
   }
 
+  const handleExportActivities = useCallback(() => {
+    try {
+      const data = displayActivities.map(activity => ({
+        Date: activity.date,
+        Time: activity.timeInterval,
+        Employee: typeof activity.user === 'object' 
+          ? `${activity.user.first_name} ${activity.user.last_name}`
+          : "N/A",
+        IDCard: typeof activity.user === 'object' ? activity.user.id_card : "N/A",
+        Department: typeof activity.user === 'object' && activity.user.department
+          ? (typeof activity.user.department === 'object' 
+            ? activity.user.department.name 
+            : activity.user.department)
+          : "N/A",
+        Region: typeof activity.user === 'object' ? activity.user.region : "N/A",
+        Branch: typeof activity.user === 'object' ? activity.user.branch : "N/A",
+        Description: activity.description,
+        Status: activity.status,
+        Category: activity.category || "N/A",
+        Priority: activity.priority || "N/A",
+        Created: activity.createdAt,
+        Updated: activity.updatedAt
+      }))
+
+      const csvContent = [
+        ['Date', 'Time', 'Employee', 'ID Card', 'Department', 'Region', 'Branch', 'Description', 'Status', 'Category', 'Priority', 'Created', 'Updated'],
+        ...data.map(row => [
+          row.Date,
+          row.Time,
+          row.Employee,
+          row.IDCard,
+          row.Department,
+          row.Region,
+          row.Branch,
+          row.Description,
+          row.Status,
+          row.Category,
+          row.Priority,
+          row.Created,
+          row.Updated
+        ])
+      ].map(e => e.join(',')).join('\n')
+
+      const blob = new Blob([csvContent], { type: 'text/csv' })
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `activities-export-${new Date().toISOString().split('T')[0]}.csv`
+      a.click()
+      window.URL.revokeObjectURL(url)
+      
+      showToast.success("Activities exported successfully")
+    } catch (error) {
+      console.error("Failed to export activities:", error)
+      showToast.error("Failed to export activities")
+    }
+  }, [displayActivities])
+
+  const handleViewActivityDetails = (activity: any) => {
+    setSelectedActivity(activity)
+    toggleModal('activityDetails', true)
+  }
+
   const formatDate = (date?: string | null) => {
     if (!date) return "N/A"
     return new Date(date).toLocaleString("en-NG", { dateStyle: "medium", timeStyle: "short" })
@@ -730,6 +912,31 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             canManageUser={canManageUser}
           />
         )
+      case "activities":
+        return (
+          <ActivitiesManagement
+            activities={displayActivities}
+            stats={activitiesStats}
+            pagination={activitiesPagination}
+            filters={activitiesFilters}
+            isLoading={adminActivitiesLoading}
+            isAdmin={isAdmin}
+            isSuperAdmin={isSuperAdmin}
+            isLineManager={isLineManager}
+            onFilterChange={(newFilters) => {
+              // Convert 'all' status to empty string
+              const normalizedFilters: ActivitiesFilters = {
+                ...newFilters,
+                status: newFilters.status === 'all' ? '' : newFilters.status
+              }
+              setActivitiesFilters(normalizedFilters)
+              loadActivitiesData(normalizedFilters)
+            }}
+            onRefresh={() => loadActivitiesData()}
+            onExport={handleExportActivities}
+            onViewDetails={handleViewActivityDetails}
+          />
+        )
       case "departments":
         // Only SUPER_ADMIN can see department management
         if (!isSuperAdmin) {
@@ -935,6 +1142,13 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
           />
         </>
       )}
+
+      {/* Activity Details Dialog */}
+      <ActivityDetailsDialog
+        open={modals.activityDetails}
+        onOpenChange={(s) => toggleModal('activityDetails', s)}
+        activity={selectedActivity}
+      />
     </TooltipProvider>
   )
 }

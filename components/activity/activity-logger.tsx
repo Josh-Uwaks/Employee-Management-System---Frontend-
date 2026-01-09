@@ -1,53 +1,57 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { StorageService, type ActivityLog } from "@/lib/storage"
+import { useActivities } from "@/context/activitiesContext"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
 import { Send, AlertTriangle, Clock } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { showToast } from "@/lib/toast"
 
 interface ActivityLoggerProps {
-  employeeId: string
   selectedDate: string
-  onActivityLogged?: (log: ActivityLog) => void
+  onActivityLogged?: () => void
   readOnly?: boolean
 }
 
-interface ActivityEntry {
-  id: string
-  description: string
-  status: "ongoing" | "pending" | "completed"
-  timestamp: string
-  changeCount?: number
-}
-
-export default function ActivityLogger({ employeeId, selectedDate, onActivityLogged, readOnly = false }: ActivityLoggerProps) {
-  const [currentSlot, setCurrentSlot] = useState(0)
+export default function ActivityLogger({ selectedDate, onActivityLogged, readOnly = false }: ActivityLoggerProps) {
+  const { createPersonalActivity, personalActivitiesLoading } = useActivities()
+  
   const [activityDescription, setActivityDescription] = useState("")
   const [activityStatus, setActivityStatus] = useState<"ongoing" | "pending" | "completed">("ongoing")
-  const [isLogging, setIsLogging] = useState(false)
-  const [todayLogs, setTodayLogs] = useState<ActivityLog[]>([])
+  const [timeInterval, setTimeInterval] = useState("")
   const [timeToNextSlot, setTimeToNextSlot] = useState<number>(0)
+  const [currentSlot, setCurrentSlot] = useState(0)
 
-  // Define work hours (8am to 5pm in half-hour slots)
+  // Define work hours (8am to 5:30pm in half-hour slots)
   const WORK_SLOT_START = 16 // 8:00 AM
-  const WORK_SLOT_END = 34 // 5:00 PM (Last loggable slot is 4:30 PM - 5:00 PM, index 33)
+  const WORK_SLOT_END = 35 // 5:30 PM
 
   useEffect(() => {
     updateCurrentSlot()
-    updateLogs()
     updateCountdown()
     
     const timer = setInterval(() => {
       updateCurrentSlot()
-      updateLogs()
       updateCountdown()
-    }, 1000) // Update every second for countdown
+    }, 1000)
 
     return () => clearInterval(timer)
-  }, [employeeId, selectedDate])
+  }, [])
+
+  useEffect(() => {
+    // Set default time interval based on current slot
+    const hour = Math.floor(currentSlot / 2)
+    const minute = (currentSlot % 2) * 30
+    const nextHour = Math.floor((currentSlot + 1) / 2) % 24
+    const nextMinute = ((currentSlot + 1) % 2) * 30
+    
+    const start = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+    const end = `${String(nextHour).padStart(2, '0')}:${String(nextMinute).padStart(2, '0')}`
+    
+    setTimeInterval(`${start} - ${end}`)
+  }, [currentSlot])
 
   const updateCurrentSlot = () => {
     const now = new Date()
@@ -60,29 +64,10 @@ export default function ActivityLogger({ employeeId, selectedDate, onActivityLog
     const currentMinutes = now.getMinutes()
     const currentSeconds = now.getSeconds()
     
-    // Calculate seconds until next half-hour mark
     const minutesUntilNextSlot = 30 - (currentMinutes % 30)
     const secondsUntilNextSlot = (minutesUntilNextSlot * 60) - currentSeconds
     
     setTimeToNextSlot(secondsUntilNextSlot)
-  }
-
-  const updateLogs = () => {
-    const logs = StorageService.getEmployeeActivity(employeeId, selectedDate)
-    setTodayLogs(logs)
-  }
-
-  const getCurrentSlotLog = () => {
-    return todayLogs.find((log) => log.slotIndex === currentSlot)
-  }
-
-  const isCurrentSlotLocked = () => {
-    return readOnly;
-  }
-
-  const getCurrentActivities = (): ActivityEntry[] => {
-    const log = getCurrentSlotLog()
-    return log?.activities || []
   }
 
   const formatCountdown = (seconds: number): string => {
@@ -91,63 +76,55 @@ export default function ActivityLogger({ employeeId, selectedDate, onActivityLog
     return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`
   }
 
-  const getCurrentSlotTimeRange = (): string => {
-    const hour = Math.floor(currentSlot / 2)
-    const minute = (currentSlot % 2) * 30
-    const nextHour = Math.floor((currentSlot + 1) / 2) % 24
-    const nextMinute = ((currentSlot + 1) % 2) * 30
-    
-    const start = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
-    const end = `${String(nextHour).padStart(2, '0')}:${String(nextMinute).padStart(2, '0')}`
-    
-    return `${start} - ${end}`
-  }
+  const submitActivityEntry = async () => {
+    if (!timeInterval.trim() || !activityDescription.trim()) {
+      showToast.error("Time interval and description are required")
+      return
+    }
 
-  const submitActivityEntry = () => {
-    // Prevent submission if outside work hours
-    if (!activityDescription.trim() || isCurrentSlotLocked() || !isWithinWorkHours) return
-
-    setIsLogging(true)
-    setTimeout(() => {
-      const currentLog = getCurrentSlotLog()
-      const currentActivities = getCurrentActivities()
-
-      const newActivity: ActivityEntry = {
-        id: Date.now().toString(),
-        description: activityDescription.trim(),
-        status: activityStatus,
-        timestamp: new Date().toISOString(),
-        changeCount: 0
+    try {
+      // Validate time interval format
+      const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]\s*-\s*([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/
+      if (!timeRegex.test(timeInterval)) {
+        showToast.error("Time interval must be in format HH:MM - HH:MM")
+        return
       }
 
-      const updatedActivities = [...currentActivities, newActivity]
+      // Validate start time < end time
+      const [start, end] = timeInterval.split('-').map(t => t.trim())
+      if (start >= end) {
+        showToast.error("Start time must be before end time")
+        return
+      }
 
-      // Always set slot status to "present" when adding activities
-      const log = StorageService.logActivity(
-        employeeId,
-        selectedDate,
-        currentSlot, // hour parameter
-        currentSlot, // slotIndex parameter (same as hour for now)
-        "present", // Auto-set to present when activity is logged
-        updatedActivities
-      )
+      await createPersonalActivity({
+        timeInterval,
+        description: activityDescription.trim(),
+        status: activityStatus
+      })
 
       setActivityDescription("")
-      setActivityStatus("ongoing") // Reset to default
-      updateLogs()
-      if (onActivityLogged) onActivityLogged(log)
-      setIsLogging(false)
-    }, 300)
+      setActivityStatus("ongoing")
+      showToast.success("Activity created successfully")
+      
+      if (onActivityLogged) {
+        onActivityLogged()
+      }
+    } catch (error) {
+      // Error handling is done in context
+      console.error("Error creating activity:", error)
+    }
   }
 
   const isWithinWorkHours = currentSlot >= WORK_SLOT_START && currentSlot < WORK_SLOT_END
-  const isLocked = isCurrentSlotLocked()
+  const isToday = selectedDate === new Date().toISOString().split("T")[0]
+  const canCreateActivity = isToday && isWithinWorkHours && !readOnly
 
   return (
     <Card className="border-slate-200/60 shadow-sm h-full">
       <CardHeader className="pb-4">
         <CardTitle className="flex items-center gap-2 text-slate-800">
-          <Send className="w-5 h-5 text-[#EC3338]" />
+          <Send className="w-5 h-5 text-red-600" />
           Activity Logger
         </CardTitle>
         <CardDescription className="text-slate-600">
@@ -156,14 +133,14 @@ export default function ActivityLogger({ employeeId, selectedDate, onActivityLog
       </CardHeader>
       <CardContent className="space-y-6">
         {/* Current Slot & Countdown Display */}
-        {isWithinWorkHours && !isLocked && (
+        {isToday && isWithinWorkHours && !readOnly && (
           <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
                 <Clock className="w-4 h-4 text-slate-600" />
                 <span className="text-sm font-medium text-slate-700">Current Slot</span>
               </div>
-              <div className="text-xs text-slate-500">{getCurrentSlotTimeRange()}</div>
+              <div className="text-xs text-slate-500">{timeInterval}</div>
             </div>
             
             <div className="flex items-center justify-between">
@@ -189,14 +166,27 @@ export default function ActivityLogger({ employeeId, selectedDate, onActivityLog
         )}
 
         {/* Activity Entry Form */}
-        {(!isLocked && isWithinWorkHours) && (
+        {canCreateActivity ? (
           <div className="space-y-4">
             <div className="space-y-3">
+              {/* Time Interval Input */}
+              <div>
+                <label className="text-sm text-slate-600 mb-2 block">Time Interval *</label>
+                <input
+                  type="text"
+                  value={timeInterval}
+                  onChange={(e) => setTimeInterval(e.target.value)}
+                  placeholder="09:00 - 10:30"
+                  className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="mt-1 text-xs text-slate-500">Format: HH:MM - HH:MM</p>
+              </div>
+
               {/* Description Input */}
               <div>
-                <label className="text-sm text-slate-600 mb-2 block">Activity Description</label>
+                <label className="text-sm text-slate-600 mb-2 block">Activity Description *</label>
                 <Textarea
-                  placeholder="Describe your activity... (e.g., I printed papers for the directors)"
+                  placeholder="Describe your activity..."
                   value={activityDescription}
                   onChange={(e) => setActivityDescription(e.target.value)}
                   className="min-h-[100px] resize-none"
@@ -214,24 +204,9 @@ export default function ActivityLogger({ employeeId, selectedDate, onActivityLog
                     <SelectValue placeholder="Select status" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="ongoing" className="flex items-center gap-2">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                        Ongoing
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="pending" className="flex items-center gap-2">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 bg-amber-500 rounded-full"></div>
-                        Pending
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="completed" className="flex items-center gap-2">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                        Completed
-                      </div>
-                    </SelectItem>
+                    <SelectItem value="ongoing">Ongoing</SelectItem>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -239,57 +214,38 @@ export default function ActivityLogger({ employeeId, selectedDate, onActivityLog
               {/* Submit Button */}
               <Button 
                 onClick={submitActivityEntry} 
-                disabled={!activityDescription.trim() || isLogging || !isWithinWorkHours}
-                className="w-full gap-2 bg-[#EC3338] hover:bg-[#d42c31]"
+                disabled={!timeInterval.trim() || !activityDescription.trim() || personalActivitiesLoading}
+                className="w-full gap-2 bg-red-600 hover:bg-red-700"
                 size="lg"
               >
                 <Send className="w-4 h-4" />
-                {isLogging ? "Submitting..." : "Submit Activity"}
+                {personalActivitiesLoading ? "Submitting..." : "Submit Activity"}
               </Button>
             </div>
           </div>
-        )}
-
-        {/* Display message when outside work hours */}
-        {(!isWithinWorkHours && !isLocked) && (
-            <div className="text-center py-8 border-2 border-dashed border-amber-200 bg-amber-50 rounded-lg">
-              <AlertTriangle className="w-8 h-8 text-amber-500 mx-auto mb-2" />
-              <p className="text-sm text-amber-700 font-medium">Outside Work Hours</p>
-              <p className="text-xs text-amber-600 mt-1">Activity logging is restricted to 8:00 AM to 5:00 PM.</p>
-            </div>
-        )}
-
-        {isLocked && (
+        ) : (
           <div className="text-center py-8 border-2 border-dashed border-slate-200 rounded-lg">
-            <Send className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-            <p className="text-sm text-slate-500">View Only Mode</p>
-            <p className="text-xs text-slate-400 mt-1">You can only view activities for past dates</p>
+            {!isToday ? (
+              <>
+                <Clock className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                <p className="text-sm text-slate-500">View Only Mode</p>
+                <p className="text-xs text-slate-400 mt-1">You can only create activities for today</p>
+              </>
+            ) : !isWithinWorkHours ? (
+              <>
+                <AlertTriangle className="w-8 h-8 text-amber-500 mx-auto mb-2" />
+                <p className="text-sm text-amber-700 font-medium">Outside Work Hours</p>
+                <p className="text-xs text-amber-600 mt-1">Activity logging is restricted to work hours (8:00 AM - 5:30 PM).</p>
+              </>
+            ) : (
+              <>
+                <Send className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                <p className="text-sm text-slate-500">View Only Mode</p>
+                <p className="text-xs text-slate-400 mt-1">Read-only access</p>
+              </>
+            )}
           </div>
         )}
-
-        {/* Quick Stats */}
-        <div className="pt-4 border-t border-slate-200">
-          <div className="grid grid-cols-3 gap-4 text-center">
-            <div>
-              <div className="text-lg font-bold text-blue-600">
-                {todayLogs.flatMap(log => log.activities || []).filter(activity => activity.status === 'ongoing').length}
-              </div>
-              <div className="text-xs text-slate-600 font-medium">Ongoing</div>
-            </div>
-            <div>
-              <div className="text-lg font-bold text-amber-600">
-                {todayLogs.flatMap(log => log.activities || []).filter(activity => activity.status === 'pending').length}
-              </div>
-              <div className="text-xs text-slate-600 font-medium">Pending</div>
-            </div>
-            <div>
-              <div className="text-lg font-bold text-green-600">
-                {todayLogs.flatMap(log => log.activities || []).filter(activity => activity.status === 'completed').length}
-              </div>
-              <div className="text-xs text-slate-600 font-medium">Completed</div>
-            </div>
-          </div>
-        </div>
       </CardContent>
     </Card>
   )
