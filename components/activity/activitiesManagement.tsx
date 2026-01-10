@@ -69,29 +69,52 @@ export default function ActivitiesManagement({
 
   const [selectedUser, setSelectedUser] = useState<string>("")
 
-  // Extract unique values for filters
-  const uniqueRegions = Array.from(new Set(activities.map(a => 
-    typeof a.user === 'object' && a.user.region ? a.user.region : ""
-  ).filter(Boolean)))
+  // Extract unique values for filters - WITH NULL CHECKS
+  const uniqueRegions = Array.from(new Set(activities
+    .map(a => {
+      // Safe check for user object and region property
+      if (a.user && typeof a.user === 'object' && a.user.region) {
+        return a.user.region;
+      }
+      return null;
+    })
+    .filter((region): region is string => region !== null && region !== '')
+  ))
 
-  const uniqueBranches = Array.from(new Set(activities.map(a => 
-    typeof a.user === 'object' && a.user.branch ? a.user.branch : ""
-  ).filter(Boolean)))
+  const uniqueBranches = Array.from(new Set(activities
+    .map(a => {
+      // Safe check for user object and branch property
+      if (a.user && typeof a.user === 'object' && a.user.branch) {
+        return a.user.branch;
+      }
+      return null;
+    })
+    .filter((branch): branch is string => branch !== null && branch !== '')
+  ))
 
-  // Fixed: Properly deduplicate users by their ID
+  // Fixed: Properly deduplicate users by their ID with comprehensive null checks
   const uniqueUsers = activities.reduce((acc, activity) => {
-    if (typeof activity.user === 'object' && activity.user._id) {
+    // Check if user exists and is an object with required properties
+    if (activity.user && 
+        typeof activity.user === 'object' && 
+        activity.user._id && 
+        (activity.user.first_name || activity.user.last_name)) {
+      
       const userId = activity.user._id;
-      if (!acc.find(u => u.id === userId)) {
+      
+      // Check if user already exists in accumulator
+      const existingUser = acc.find(u => u.id === userId);
+      
+      if (!existingUser) {
         acc.push({
           id: userId,
-          name: `${activity.user.first_name} ${activity.user.last_name}`,
-          id_card: activity.user.id_card
+          name: `${activity.user.first_name || ''} ${activity.user.last_name || ''}`.trim() || 'Unknown User',
+          id_card: activity.user.id_card || 'N/A'
         });
       }
     }
     return acc;
-  }, [] as { id: string; name: string; id_card: string }[]);
+  }, [] as { id: string; name: string; id_card: string }[])
 
   useEffect(() => {
     // Apply filters after a short delay to prevent too many API calls
@@ -175,19 +198,27 @@ export default function ActivitiesManagement({
   }
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-NG', {
-      weekday: 'short',
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    })
+    try {
+      return new Date(dateString).toLocaleDateString('en-NG', {
+        weekday: 'short',
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      })
+    } catch {
+      return 'Invalid Date'
+    }
   }
 
   const formatTime = (dateString: string) => {
-    return new Date(dateString).toLocaleTimeString('en-NG', {
-      hour: '2-digit',
-      minute: '2-digit'
-    })
+    try {
+      return new Date(dateString).toLocaleTimeString('en-NG', {
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+    } catch {
+      return 'Invalid Time'
+    }
   }
 
   return (
@@ -474,17 +505,17 @@ export default function ActivitiesManagement({
                         </div>
                       </div>
                       
-                      {/* User Info */}
-                      {typeof activity.user === 'object' && (
+                      {/* User Info - WITH NULL CHECKS */}
+                      {activity.user && typeof activity.user === 'object' && (
                         <div className="space-y-1 pt-2 border-t">
                           <div className="flex items-center gap-2">
                             <User className="h-4 w-4 text-slate-400" />
                             <span className="font-medium">
-                              {activity.user.first_name} {activity.user.last_name}
+                              {activity.user.first_name || ''} {activity.user.last_name || ''}
                             </span>
                           </div>
                           <div className="text-xs text-slate-500">
-                            {activity.user.id_card} • {activity.user.role}
+                            {activity.user.id_card || ''} • {activity.user.role || ''}
                           </div>
                           <div className="flex flex-wrap gap-1">
                             {activity.user.region && (

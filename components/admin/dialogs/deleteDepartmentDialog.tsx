@@ -31,11 +31,16 @@ export default function DeleteDepartmentDialog({
 }: DeleteDepartmentDialogProps) {
   if (!department) return null
 
-  const assignedEmployees = employees.filter(emp => 
-    typeof emp.department === 'object' 
-      ? emp.department._id === department._id 
-      : emp.department === department._id
-  )
+  // Filter employees assigned to this department, handling null departments
+  const assignedEmployees = employees.filter(emp => {
+    if (!emp.department) return false;
+    
+    if (typeof emp.department === 'object') {
+      return emp.department._id === department._id;
+    } else {
+      return emp.department === department._id;
+    }
+  })
 
   const canDelete = assignedEmployees.length === 0
 

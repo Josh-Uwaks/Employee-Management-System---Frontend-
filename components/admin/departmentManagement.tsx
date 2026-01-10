@@ -53,6 +53,21 @@ export default function DepartmentManagement({
   onDeleteDepartment,
 }: DepartmentManagementProps) {
 
+  const getEmployeeCount = (departmentId: string) => {
+    return employees.filter(emp => {
+      // Skip employees without a department assignment
+      if (!emp.department) return false;
+      
+      // Handle both string ID and Department object
+      if (typeof emp.department === 'string') {
+        return emp.department === departmentId;
+      } else {
+        // It's a Department object
+        return emp.department._id === departmentId;
+      }
+    }).length;
+  }
+
   const filteredDepartments = departments.filter((dept) => {
     const q = searchQuery.toLowerCase()
     return (
@@ -62,17 +77,14 @@ export default function DepartmentManagement({
     )
   })
 
-  const getEmployeeCount = (departmentId: string) => {
-    return employees.filter(emp => 
-      typeof emp.department === 'object' 
-        ? emp.department._id === departmentId 
-        : emp.department === departmentId
-    ).length
-  }
-
   const activeDepartments = departments.filter(dept => dept.isActive).length
   const totalEmployees = employees.length
-  const departmentsWithStaff = departments.filter(dept => getEmployeeCount(dept._id) > 0).length
+  
+  // Calculate departments with staff, handling null departments
+  const departmentsWithStaff = departments.filter(dept => {
+    const count = getEmployeeCount(dept._id);
+    return count > 0;
+  }).length;
 
   if (isLoading) {
     return (
