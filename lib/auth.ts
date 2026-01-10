@@ -4,6 +4,16 @@ import api from './api';
    Types
 ========================= */
 
+export const REGIONS = ['Lagos', 'Delta', 'Osun'] as const;
+export const BRANCHES = {
+  Lagos: ['HQ', 'Alimosho'],
+  Delta: ['Warri'],
+  Osun: ['Osun']
+} as const;
+
+export type Region = typeof REGIONS[number];
+export type Branch = 'HQ' | 'Alimosho' | 'Warri' | 'Osun';
+
 export interface Department {
   _id: string;
   name: string;
@@ -21,8 +31,8 @@ export interface User {
   department?: Department | string;
   position?: string;
   reportsTo?: any;
-  region?: string;
-  branch?: string;
+  region?: Region;  // Updated
+  branch?: Branch;  // Updated
   isAdmin: boolean;
   isVerified: boolean;
   isLocked?: boolean;
@@ -50,8 +60,8 @@ export interface RegistrationData {
   password: string;
   first_name: string;
   last_name: string;
-  region?: string;
-  branch?: string;
+  region?: Region;    // Updated
+  branch?: Branch;    // Updated
   department: string;
   position?: string;
   role?: 'STAFF' | 'LINE_MANAGER' | 'SUPER_ADMIN';
@@ -102,6 +112,8 @@ export interface LockedAccount {
   last_name: string;
   role: string;
   department?: Department;
+  region?: Region;    // Updated
+  branch?: Branch;    // Updated
   isLocked: boolean;
   lockedAt: string;
   lockedReason: string;
@@ -347,6 +359,8 @@ export const lockAccount = async (data: LockAccountData): Promise<{
     last_name: string; 
     role: string;
     department?: Department;
+    region?: Region;    // Updated
+    branch?: Branch;    // Updated
     lockedAt: string;
     lockedReason: string;
   };

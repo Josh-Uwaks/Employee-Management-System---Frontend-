@@ -2,7 +2,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Department, Employee } from "@/lib/admin"
+import { Department, Employee, Region, Branch, REGIONS, BRANCHES, validateLocation, getBranchesForRegion } from "@/lib/admin"
 import { authApi } from "@/lib/auth"
 import { showToast } from "@/lib/toast"
 import {
@@ -33,7 +33,34 @@ import { Button } from "@/components/ui/button"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useForm } from "react-hook-form"
 import * as z from "zod"
-import { Loader2, UserPlus } from "lucide-react"
+import { Loader2, UserPlus, MapPin, Building, UserCog } from "lucide-react"
+
+// Helper function to convert empty strings to undefined
+const toOptionalString = (value: string | undefined): string | undefined => {
+  return value && value !== "none" ? value : undefined;
+};
+
+// Define location validation schema
+const locationSchema = z.object({
+  region: z.string().optional(),
+  branch: z.string().optional()
+}).refine((data) => {
+  // If either region or branch is provided, both must be provided and valid
+  const region = toOptionalString(data.region);
+  const branch = toOptionalString(data.branch);
+  
+  if (region || branch) {
+    if (!region || !branch) {
+      return false;
+    }
+    const validBranches = BRANCHES[region as Region] as readonly Branch[] | undefined;
+    return Boolean(validBranches && validBranches.includes(branch as Branch));
+  }
+  return true;
+}, {
+  message: "Invalid region and branch combination. Please select a valid branch for the chosen region.",
+  path: ["branch"]
+});
 
 const formSchema = z.object({
   id_card: z.string()
@@ -50,10 +77,12 @@ const formSchema = z.object({
   region: z.string().optional(),
   branch: z.string().optional(),
   reportsTo: z.string().optional(),
-}).refine((data) => data.password === data.confirmPassword, {
+})
+.refine((data) => data.password === data.confirmPassword, {
   message: "Passwords don't match",
   path: ["confirmPassword"],
 })
+.and(locationSchema); // Combine with location validation
 
 interface RegisterUserDialogProps {
   open: boolean
@@ -74,6 +103,7 @@ export default function RegisterUserDialog({
 }: RegisterUserDialogProps) {
   const [isLoading, setIsLoading] = useState(false)
   const [filteredManagers, setFilteredManagers] = useState<Employee[]>([])
+  const [availableBranches, setAvailableBranches] = useState<Branch[]>([])
   const BRAND_COLOR = "#ec3338";
 
   const form = useForm<z.infer<typeof formSchema>>({
@@ -81,29 +111,87 @@ export default function RegisterUserDialog({
     defaultValues: {
       id_card: "", email: "", password: "", confirmPassword: "",
       first_name: "", last_name: "", role: "STAFF", department: "",
-      position: "", region: "", branch: "", reportsTo: "",
+      position: "", region: "none", branch: "none", reportsTo: "none",
     },
   })
 
   const watchRole = form.watch("role")
+  const watchRegion = form.watch("region")
 
+  // Update available branches when region changes
   useEffect(() => {
-    if (watchRole === "STAFF") {
-      const managers = employees.filter(emp => emp.role === "LINE_MANAGER" && emp.is_active && !emp.isLocked)
-      setFilteredManagers(managers)
-      if (managers.length === 1 && !form.getValues("reportsTo")) {
-        form.setValue("reportsTo", managers[0]._id)
+    const regionValue = toOptionalString(watchRegion);
+    if (regionValue && REGIONS.includes(regionValue as Region)) {
+      const branches = getBranchesForRegion(regionValue as Region)
+      setAvailableBranches(branches)
+      
+      // Clear branch if it's not valid for the new region
+      const currentBranch = form.getValues("branch")
+      const currentBranchValue = toOptionalString(currentBranch);
+      if (currentBranchValue && !branches.includes(currentBranchValue as Branch)) {
+        form.setValue("branch", "none")
       }
     } else {
-      setFilteredManagers([])
-      form.setValue("reportsTo", "")
+      setAvailableBranches([])
+      form.setValue("branch", "none")
+    }
+  }, [watchRegion, form])
+
+  // Update available managers based on role
+  useEffect(() => {
+    let availableManagers: Employee[] = [];
+    
+    if (watchRole === "STAFF") {
+      // STAFF can report to LINE_MANAGER or SUPER_ADMIN
+      availableManagers = employees.filter(emp => 
+        (emp.role === "LINE_MANAGER" || emp.role === "SUPER_ADMIN") && 
+        emp.is_active && 
+        !emp.isLocked
+      )
+    } else if (watchRole === "LINE_MANAGER") {
+      // LINE_MANAGER can report to SUPER_ADMIN
+      availableManagers = employees.filter(emp => 
+        emp.role === "SUPER_ADMIN" && 
+        emp.is_active && 
+        !emp.isLocked
+      )
+    }
+    // SUPER_ADMIN typically doesn't report to anyone
+    
+    setFilteredManagers(availableManagers)
+    
+    // Auto-select if only one manager available and not already set
+    if (availableManagers.length === 1 && form.getValues("reportsTo") === "none") {
+      form.setValue("reportsTo", availableManagers[0]._id)
+    } else if (availableManagers.length === 0) {
+      form.setValue("reportsTo", "none")
     }
   }, [watchRole, employees, form])
 
   const handleSubmit = async (values: z.infer<typeof formSchema>) => {
     setIsLoading(true)
     try {
-      const response = await authApi.register(values)
+      // Convert "none" to undefined for API
+      const regionValue = toOptionalString(values.region);
+      const branchValue = toOptionalString(values.branch);
+      const reportsToValue = toOptionalString(values.reportsTo);
+      
+      // Prepare registration data with proper typing
+      const registrationData = {
+        id_card: values.id_card,
+        email: values.email,
+        password: values.password,
+        first_name: values.first_name,
+        last_name: values.last_name,
+        role: values.role,
+        department: values.department,
+        position: values.position,
+        region: regionValue ? (regionValue as Region) : undefined,
+        branch: branchValue ? (branchValue as Branch) : undefined,
+        reportsTo: reportsToValue
+      }
+
+      const response = await authApi.register(registrationData)
       if (response.success) {
         showToast.success(response.message || "User registered successfully")
         form.reset()
@@ -117,8 +205,72 @@ export default function RegisterUserDialog({
     }
   }
 
+  // Reset form when dialog closes
+  const handleOpenChange = (open: boolean) => {
+    if (!open) {
+      form.reset({
+        id_card: "", email: "", password: "", confirmPassword: "",
+        first_name: "", last_name: "", role: "STAFF", department: "",
+        position: "", region: "none", branch: "none", reportsTo: "none",
+      })
+      setAvailableBranches([])
+    }
+    onOpenChange(open)
+  }
+
+  // Helper function to handle clearing region/branch
+  const clearLocation = () => {
+    form.setValue("region", "none")
+    form.setValue("branch", "none")
+  }
+
+  // Get the appropriate reportsTo label based on role
+  const getReportsToLabel = () => {
+    switch (watchRole) {
+      case "STAFF":
+        return "Reports To (Manager) *";
+      case "LINE_MANAGER":
+        return "Reports To (Super Admin)";
+      case "SUPER_ADMIN":
+        return "Reports To (Optional)";
+      default:
+        return "Reports To";
+    }
+  }
+
+  // Get the appropriate placeholder for reportsTo
+  const getReportsToPlaceholder = () => {
+    switch (watchRole) {
+      case "STAFF":
+        return "Select a manager";
+      case "LINE_MANAGER":
+        return "Select a super admin";
+      case "SUPER_ADMIN":
+        return "Optional - select if reporting to someone";
+      default:
+        return "Select";
+    }
+  }
+
+  // Get description for reportsTo field
+  const getReportsToDescription = () => {
+    switch (watchRole) {
+      case "STAFF":
+        return "STAFF must report to a LINE_MANAGER or SUPER_ADMIN";
+      case "LINE_MANAGER":
+        return "LINE_MANAGER typically reports to SUPER_ADMIN";
+      case "SUPER_ADMIN":
+        return "SUPER_ADMIN usually has no direct supervisor";
+      default:
+        return "";
+    }
+  }
+
+  // Check if reportsTo is required
+  const isReportsToRequired = watchRole === "STAFF";
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-[650px] border-t-4" style={{ borderTopColor: BRAND_COLOR }}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-xl font-bold tracking-tight">
@@ -227,7 +379,7 @@ export default function RegisterUserDialog({
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel className="text-xs font-semibold uppercase text-muted-foreground">Access Level *</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
                         <SelectTrigger className="focus:ring-[#ec3338]">
                           <SelectValue placeholder="Select role" />
@@ -250,7 +402,7 @@ export default function RegisterUserDialog({
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel className="text-xs font-semibold uppercase text-muted-foreground">Department *</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
                         <SelectTrigger className="focus:ring-[#ec3338]">
                           <SelectValue placeholder="Select department" />
@@ -281,57 +433,168 @@ export default function RegisterUserDialog({
                 )}
               />
 
-              <FormField
-                control={form.control}
-                name="region"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="text-xs font-semibold uppercase text-muted-foreground">Region</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
-                      <FormControl>
-                        <SelectTrigger className="focus:ring-[#ec3338]">
-                          <SelectValue placeholder="Select region" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="Lagos">Lagos</SelectItem>
-                        <SelectItem value="Delta">Delta</SelectItem>
-                        <SelectItem value="Osun">Osun</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              {/* --- Section: Location --- */}
+              <div className="md:col-span-2 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                    <MapPin size={14} />
+                    <span>Location Information (Optional)</span>
+                  </div>
+                  {(toOptionalString(watchRegion) || toOptionalString(form.getValues("branch"))) && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={clearLocation}
+                      className="h-auto p-1 text-xs text-slate-500 hover:text-slate-700"
+                    >
+                      Clear location
+                    </Button>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="region"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs font-semibold uppercase text-muted-foreground">Region</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger className="focus:ring-[#ec3338]">
+                              <SelectValue placeholder="Select region" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="none">Not specified</SelectItem>
+                            {REGIONS.map((region) => (
+                              <SelectItem key={region} value={region}>{region}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
-              {watchRole === "STAFF" && (
+                  <FormField
+                    control={form.control}
+                    name="branch"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs font-semibold uppercase text-muted-foreground">Branch</FormLabel>
+                        <Select 
+                          onValueChange={field.onChange} 
+                          value={field.value}
+                          disabled={!watchRegion || watchRegion === "none"}
+                        >
+                          <FormControl>
+                            <SelectTrigger className="focus:ring-[#ec3338]">
+                              <SelectValue placeholder={
+                                !watchRegion || watchRegion === "none" 
+                                  ? "Select region first" 
+                                  : "Select branch"
+                              } />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="none">Not specified</SelectItem>
+                            {availableBranches.map((branch) => (
+                              <SelectItem key={branch} value={branch}>
+                                <div className="flex items-center gap-2">
+                                  <Building size={12} className="text-slate-400" />
+                                  <span>{branch}</span>
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                        {watchRegion && watchRegion !== "none" && availableBranches.length === 0 && (
+                          <p className="text-xs text-amber-600 mt-1">
+                            No branches available for selected region
+                          </p>
+                        )}
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                <div className="text-xs text-slate-500 bg-slate-50 p-2 rounded">
+                  <p className="font-medium mb-1">Note:</p>
+                  <ul className="list-disc pl-4 space-y-0.5">
+                    <li>Location is optional but recommended for regional tracking</li>
+                    <li>If region is selected, branch must also be selected for validation</li>
+                    <li>Valid combinations: Lagos (HQ, Alimosho), Delta (Warri), Osun (Osun)</li>
+                    <li>Select "Not specified" to skip location information</li>
+                  </ul>
+                </div>
+              </div>
+
+              {/* --- Section: Reporting Structure --- */}
+              <div className="md:col-span-2 space-y-3">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                  <UserCog size={14} />
+                  <span>Reporting Structure</span>
+                </div>
+                
                 <FormField
                   control={form.control}
                   name="reportsTo"
                   render={({ field }) => (
-                    <FormItem className="md:col-span-2 bg-slate-50 p-3 rounded-lg border border-dashed">
-                      <FormLabel className="text-xs font-bold uppercase text-[#ec3338]">Reporting Line Manager *</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <FormItem className="bg-slate-50 p-3 rounded-lg border border-dashed">
+                      <FormLabel className={`text-xs font-bold uppercase ${isReportsToRequired ? 'text-[#ec3338]' : 'text-muted-foreground'}`}>
+                        {getReportsToLabel()}
+                      </FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                           <SelectTrigger className="bg-white focus:ring-[#ec3338]">
-                            <SelectValue placeholder="Assign a manager" />
+                            <SelectValue placeholder={getReportsToPlaceholder()} />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
+                          <SelectItem value="none">No manager assigned</SelectItem>
                           {filteredManagers.map((m) => (
-                            <SelectItem key={m._id} value={m._id}>{m.first_name} {m.last_name} ({m.id_card})</SelectItem>
+                            <SelectItem key={m._id} value={m._id}>
+                              <div className="flex flex-col">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium">{m.first_name} {m.last_name}</span>
+                                  <Badge variant="outline" className="text-xs capitalize">
+                                    {m.role.toLowerCase().replace('_', ' ')}
+                                  </Badge>
+                                </div>
+                                <div className="flex items-center gap-2 text-xs text-slate-500 mt-1">
+                                  <span>ID: {m.id_card}</span>
+                                  {m.department && (
+                                    <span>• Dept: {typeof m.department === 'object' ? m.department.name : 'N/A'}</span>
+                                  )}
+                                  {m.region && (
+                                    <span>• Location: {m.region} {m.branch ? `- ${m.branch}` : ''}</span>
+                                  )}
+                                </div>
+                              </div>
+                            </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                       <FormMessage />
+                      {filteredManagers.length === 0 && watchRole !== "SUPER_ADMIN" && (
+                        <p className="text-xs text-amber-600 mt-1">
+                          No available {watchRole === "STAFF" ? "managers (LINE_MANAGER or SUPER_ADMIN)" : "super admins"} to assign
+                        </p>
+                      )}
+                      {getReportsToDescription() && (
+                        <p className="text-xs text-slate-500 mt-1">
+                          {getReportsToDescription()}
+                        </p>
+                      )}
                     </FormItem>
                   )}
                 />
-              )}
+              </div>
             </div>
 
             <DialogFooter className="border-t pt-4">
-              <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={isLoading}>
+              <Button type="button" variant="ghost" onClick={() => handleOpenChange(false)} disabled={isLoading}>
                 Cancel
               </Button>
               <Button type="submit" disabled={isLoading} className="text-white transition-all active:scale-95 px-8" style={{ backgroundColor: BRAND_COLOR }}>
@@ -344,3 +607,6 @@ export default function RegisterUserDialog({
     </Dialog>
   )
 }
+
+// Add Badge component import if not already available
+import { Badge } from "@/components/ui/badge"

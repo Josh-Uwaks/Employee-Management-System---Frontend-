@@ -1,4 +1,4 @@
-import { Employee, Department } from "@/lib/admin"
+import { Employee, Department, Region, Branch } from "@/lib/admin"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -30,7 +30,12 @@ interface EmployeeManagementProps {
   canManageUser: (employee: Employee) => boolean
   canRegisterUser?: boolean
   onRegisterUser?: () => void
+  // Updated location props - make them more flexible
+  getFullLocation?: (employee: Employee) => string
+  regions?: readonly string[] // Changed from Region[] to string[]
+  getAvailableBranches?: (region: string) => string[] // Changed return type to string[]
 }
+
 
 export default function EmployeeManagement({
   employees,
@@ -48,6 +53,10 @@ export default function EmployeeManagement({
   canManageUser,
   canRegisterUser,
   onRegisterUser,
+  // Updated location props with defaults
+  getFullLocation,
+  regions = [],
+  getAvailableBranches = () => [],
 }: EmployeeManagementProps) {
   
   // Filter employees based on search and status
@@ -66,6 +75,18 @@ export default function EmployeeManagement({
       default: return true
     }
   })
+
+  // Helper function to get location display
+  const getLocationDisplay = (employee: Employee): string => {
+    if (getFullLocation) {
+      return getFullLocation(employee);
+    }
+    // Fallback if getFullLocation is not provided
+    if (employee.region && employee.branch) {
+      return `${employee.region} - ${employee.branch}`;
+    }
+    return employee.region || employee.branch || "Not specified";
+  };
 
   // Role-based statistics
   const lockedCount = employees.filter(emp => emp.isLocked).length
@@ -278,10 +299,27 @@ export default function EmployeeManagement({
                               </div>
                             )}
                             
-                            {emp.region && (
+                            {(emp.region || emp.branch) && (
                               <div className="flex items-center gap-1">
                                 <MapIcon size={12} />
-                                <span>{emp.region}{emp.branch ? ` • ${emp.branch}` : ''}</span>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className="cursor-help border-b border-dashed border-slate-300">
+                                      {getLocationDisplay(emp)}
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top">
+                                    <div className="space-y-1">
+                                      <p className="text-sm">Region: {emp.region || "Not specified"}</p>
+                                      <p className="text-sm">Branch: {emp.branch || "Not specified"}</p>
+                                      {getFullLocation && (
+                                        <p className="text-sm font-medium mt-1 pt-1 border-t border-slate-200">
+                                          Full Location: {getFullLocation(emp)}
+                                        </p>
+                                      )}
+                                    </div>
+                                  </TooltipContent>
+                                </Tooltip>
                               </div>
                             )}
                           </div>

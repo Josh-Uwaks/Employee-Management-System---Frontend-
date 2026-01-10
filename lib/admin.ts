@@ -5,6 +5,16 @@ import api from "./api";
    Types
 ========================= */
 
+export const REGIONS = ['Lagos', 'Delta', 'Osun'] as const;
+export const BRANCHES = {
+  Lagos: ['HQ', 'Alimosho'],
+  Delta: ['Warri'],
+  Osun: ['Osun']
+} as const;
+
+export type Region = typeof REGIONS[number];
+export type Branch = 'HQ' | 'Alimosho' | 'Warri' | 'Osun';
+
 export interface Department {
   _id: string;
   name: string;
@@ -25,8 +35,8 @@ export interface Employee {
   department?: Department | string;
   position?: string;
   reportsTo?: any;
-  region?: string;
-  branch?: string;
+  region?: Region;  // Updated
+  branch?: Branch;  // Updated
   is_active: boolean;
   isAdmin: boolean;
   isLocked: boolean;
@@ -35,13 +45,25 @@ export interface Employee {
   lockedAt?: string | null; 
   lockedReason?: string | null;
   lastCheckinAt?: string | null;
-  lastCheckinRegion?: string | null;
-  lastCheckinBranch?: string | null;
+  lastCheckinRegion?: Region | null;  // Updated
+  lastCheckinBranch?: Branch | null;  // Updated
   otp?: string | null;
   otpExpiresAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }
+
+// Add a helper function for location validation
+export const validateLocation = (region: Region, branch: Branch): boolean => {
+  const validBranches = BRANCHES[region] as readonly Branch[] | undefined;
+  return Boolean(validBranches && validBranches.includes(branch));
+};
+
+// Add a function to get available branches for a region
+export const getBranchesForRegion = (region: Region): Branch[] => {
+  const branches = BRANCHES[region] as readonly Branch[] | undefined;
+  return branches ? Array.from(branches) : [];
+};
 
 export interface DailyActivity {
   _id: string;
@@ -259,15 +281,76 @@ export const createDepartment = async (data: {
   description?: string;
 }): Promise<Department> => {
   try {
-    const res = await api.post<DepartmentResponse>('/departments', data);
+    const res = await api.post<any>('/departments', data); // Use 'any' temporarily for debugging
+    
+    console.log('[DEBUG] createDepartment raw response:', res.data);
     
     if (!res.data.success) {
       throw new Error(res.data.message || "Failed to create department");
     }
     
-    return res.data.data;
+    // Extract department data from response
+    const responseData = res.data.data;
+    
+    // Debug the structure
+    console.log('[DEBUG] Response data structure:', {
+      type: typeof responseData,
+      has_id: responseData._id !== undefined,
+      has__id: responseData._id !== undefined,
+      keys: Object.keys(responseData)
+    });
+    
+    // Handle different response formats
+    let departmentData: any;
+    
+    if (responseData && typeof responseData === 'object') {
+      // If it's a Mongoose document, it might have _id instead of _id
+      departmentData = {
+        _id: responseData._id || responseData._id || '',
+        name: responseData.name || '',
+        code: responseData.code || '',
+        description: responseData.description || '',
+        isActive: responseData.isActive !== undefined ? responseData.isActive : true,
+        createdAt: responseData.createdAt || new Date().toISOString(),
+        updatedAt: responseData.updatedAt || new Date().toISOString()
+      };
+    } else {
+      throw new Error("Invalid department response format");
+    }
+    
+    // Validate required fields
+    if (!departmentData._id) {
+      throw new Error("Department created but missing ID");
+    }
+    
+    console.log('[DEBUG] Processed department data:', departmentData);
+    
+    return departmentData;
   } catch (error: any) {
-    console.error("createDepartment error:", error.response?.data || error.message);
+    console.error("createDepartment error:", {
+      message: error?.message,
+      status: error?.response?.status,
+      response: error?.response?.data,
+      fullError: error
+    });
+    
+    // Provide more specific error messages
+    if (error?.response?.status === 400) {
+      if (error?.response?.data?.message?.includes('already exists')) {
+        throw new Error("A department with this name or code already exists");
+      }
+      if (error?.response?.data?.message?.includes('required')) {
+        throw new Error(error.response.data.message);
+      }
+    }
+    
+    if (error?.response?.status === 403) {
+      throw new Error("Only SUPER_ADMIN can create departments");
+    }
+    
+    if (error?.response?.status === 409) {
+      throw new Error(error.response.data.message || "Department already exists");
+    }
     
     throw new Error(
       error?.response?.data?.message ||

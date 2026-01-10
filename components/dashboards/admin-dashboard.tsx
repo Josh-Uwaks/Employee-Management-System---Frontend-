@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from "react"
 import { useAuth } from "@/context/authContext"
 import { useAdmin } from "@/context/adminContext"
 import { useActivities } from "@/context/activitiesContext"
-import { Employee, Department } from "@/lib/admin"
+import { Employee, Department, REGIONS, BRANCHES, validateLocation, getBranchesForRegion, Region, Branch } from "@/lib/admin"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -61,8 +61,8 @@ type ViewItem = {
 interface ActivitiesFilters {
   date: string;
   status: string;
-  region: string;
-  branch: string;
+  region: Region | "";
+  branch: Branch | "";
   page: number;
   limit: number;
 }
@@ -127,7 +127,13 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   const [lockReason, setLockReason] = useState("")
   
   const [editFormData, setEditFormData] = useState<Partial<Employee>>({
-    first_name: "", last_name: "", role: "", department: "", region: "", branch: ""
+    first_name: "", 
+    last_name: "", 
+    role: "", 
+    department: "", 
+    region: undefined,
+    branch: undefined,
+    position: ""
   })
 
   const [departmentFormData, setDepartmentFormData] = useState<DepartmentFormData>({
@@ -193,6 +199,29 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     return { total, active, locked, unverified, efficiency }
   }, [displayEmployees, lockedAccounts])
 
+  // Location-based statistics
+  const locationStats = useMemo(() => {
+    const statsByRegion: Record<string, { count: number; branches: Record<string, number> }> = {};
+    
+    displayEmployees.forEach(employee => {
+      if (employee.region) {
+        if (!statsByRegion[employee.region]) {
+          statsByRegion[employee.region] = { count: 0, branches: {} };
+        }
+        statsByRegion[employee.region].count++;
+        
+        if (employee.branch) {
+          if (!statsByRegion[employee.region].branches[employee.branch]) {
+            statsByRegion[employee.region].branches[employee.branch] = 0;
+          }
+          statsByRegion[employee.region].branches[employee.branch]++;
+        }
+      }
+    });
+    
+    return statsByRegion;
+  }, [displayEmployees]);
+
   // Role-based access information
   const roleInfo = useMemo(() => {
     if (isLineManager) {
@@ -227,6 +256,44 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       }
     }
   }, [isLineManager, isSuperAdmin])
+
+  // Location helper functions - FIXED to accept string
+  const locationHelper = useMemo(() => ({
+    // Get available branches for a given region - accept string
+    getAvailableBranches: (region: string): string[] => {
+      if (!region) return [];
+      // Check if it's a valid Region type
+      if (REGIONS.includes(region as Region)) {
+        return getBranchesForRegion(region as Region);
+      }
+      return [];
+    },
+    
+    // Get full location display
+    getFullLocation: (employee: Employee): string => {
+      if (!employee.region && !employee.branch) return "Not specified";
+      if (!employee.branch) return employee.region || "";
+      if (!employee.region) return employee.branch || "";
+      return `${employee.region} - ${employee.branch}`;
+    },
+    
+    // Validate location for editing
+    isValidLocation: (region?: Region, branch?: Branch): boolean => {
+      if (!region || !branch) return false;
+      return validateLocation(region, branch);
+    },
+
+    // Get all valid region-branch combinations
+    getValidLocationCombinations: () => {
+      const combinations: Array<{region: Region, branch: Branch}> = [];
+      Object.entries(BRANCHES).forEach(([region, branches]) => {
+        branches.forEach(branch => {
+          combinations.push({ region: region as Region, branch: branch as Branch });
+        });
+      });
+      return combinations;
+    }
+  }), []);
 
   // Available views based on role - properly typed
   const availableViews = useMemo((): ViewItem[] => {
@@ -309,14 +376,28 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         limit: filters.limit
       }
 
+      // Validate region-branch combination if both are provided
+      if (filters.region && filters.branch) {
+        const isValid = validateLocation(filters.region as Region, filters.branch as Branch);
+        if (!isValid) {
+          showToast.error("Invalid location filter combination");
+          return;
+        }
+      }
+
       if (isLineManager) {
         // LINE_MANAGER loads activities for their direct reports
         const directReports = displayEmployees.filter(emp => 
           emp.reportsTo && emp.reportsTo._id === authUser?._id
         )
         
+        // Apply location filter if specified
+        const filteredReports = filters.region 
+          ? directReports.filter(emp => emp.region === filters.region)
+          : directReports;
+        
         // Load activities for each direct report
-        for (const report of directReports) {
+        for (const report of filteredReports) {
           await loadActivitiesByUser(report._id, {
             date: filteredParams.date,
             status: filteredParams.status,
@@ -442,8 +523,9 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       last_name: employee.last_name,
       role: employee.role,
       department: typeof employee.department === 'object' ? employee.department._id : employee.department || "",
-      region: employee.region || "",
-      branch: employee.branch || ""
+      region: employee.region || undefined,
+      branch: employee.branch || undefined,
+      position: employee.position || "",
     })
     toggleModal('edit', true)
   }
@@ -451,6 +533,15 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   const handleSaveEdit = async () => {
     if (!selectedEmployee) return
     
+    // Validate location if provided
+    if (editFormData.region && editFormData.branch) {
+      const isValid = locationHelper.isValidLocation(editFormData.region as Region, editFormData.branch as Branch);
+      if (!isValid) {
+        showToast.error("Invalid location combination. Please check region and branch.");
+        return;
+      }
+    }
+
     // Optimistically update UI
     setOptimisticEmployees(prev => 
       prev.map(emp => 
@@ -465,47 +556,65 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       toggleModal('edit', false)
       showToast.success("User updated successfully")
       await refetchData('users')
-    } catch (error) {
+    } catch (error: any) {
       // Revert optimistic update on error
       setOptimisticEmployees([])
-      showToast.error("Failed to update user")
+      
+      if (error.message?.includes("Invalid region and branch combination")) {
+        showToast.error("Invalid location combination. Please check region and branch settings.");
+      } else {
+        showToast.error("Failed to update user")
+      }
     }
   }
 
   const handleCreateDepartment = async () => {
-    if (!isSuperAdmin) {
-      showToast.error("Only SUPER_ADMIN can create departments")
-      return
-    }
-    
-    // Optimistically update UI
-    const newDept: Department = {
-      _id: `temp-${Date.now()}`,
-      name: departmentFormData.name,
-      code: departmentFormData.code,
-      description: departmentFormData.description,
-      isActive: true,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    }
-    setOptimisticDepartments(prev => [...prev, newDept])
-    
-    try {
-      await createDepartment({
-        name: departmentFormData.name,
-        code: departmentFormData.code || undefined,
-        description: departmentFormData.description || undefined
-      })
-      setDepartmentFormData({ name: "", code: "", description: "" })
-      toggleModal('createDept', false)
-      showToast.success("Department created successfully")
-      await refetchData('departments')
-    } catch (error) {
-      // Revert optimistic update on error
-      setOptimisticDepartments([])
-      showToast.error("Failed to create department")
-    }
+  if (!isSuperAdmin) {
+    showToast.error("Only SUPER_ADMIN can create departments")
+    return
   }
+  
+  try {
+    console.log('Creating department with data:', departmentFormData);
+    
+    const response = await createDepartment({
+      name: departmentFormData.name,
+      code: departmentFormData.code || undefined,
+      description: departmentFormData.description || undefined
+    });
+    
+    console.log('Department creation response:', response);
+    
+    // Type guard to ensure it's a valid Department
+    if (!response || !response._id) {
+      console.error('Invalid department response:', response);
+      throw new Error("Failed to create department: Invalid response from server");
+    }
+    
+    // Now add the real department
+    const newDepartment: Department = {
+      _id: response._id,
+      name: response.name,
+      code: response.code,
+      description: response.description,
+      isActive: response.isActive,
+      createdAt: response.createdAt,
+      updatedAt: response.updatedAt
+    };
+    
+    setOptimisticDepartments(prev => [...prev, newDepartment])
+    
+    setDepartmentFormData({ name: "", code: "", description: "" })
+    toggleModal('createDept', false)
+    showToast.success("Department created successfully")
+    await refetchData('departments')
+  } catch (error: any) {
+    console.error('Error creating department:', error);
+    // Revert optimistic update on error
+    setOptimisticDepartments([])
+    showToast.error(error.message || "Failed to create department")
+  }
+}
 
   const handleOpenEditDepartment = (department: Department) => {
     if (!isSuperAdmin) {
@@ -611,6 +720,9 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
           : "N/A",
         Region: typeof activity.user === 'object' ? activity.user.region : "N/A",
         Branch: typeof activity.user === 'object' ? activity.user.branch : "N/A",
+        Location: typeof activity.user === 'object' 
+          ? locationHelper.getFullLocation(activity.user as Employee)
+          : "N/A",
         Description: activity.description,
         Status: activity.status,
         Category: activity.category || "N/A",
@@ -620,7 +732,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       }))
 
       const csvContent = [
-        ['Date', 'Time', 'Employee', 'ID Card', 'Department', 'Region', 'Branch', 'Description', 'Status', 'Category', 'Priority', 'Created', 'Updated'],
+        ['Date', 'Time', 'Employee', 'ID Card', 'Department', 'Region', 'Branch', 'Location', 'Description', 'Status', 'Category', 'Priority', 'Created', 'Updated'],
         ...data.map(row => [
           row.Date,
           row.Time,
@@ -629,6 +741,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
           row.Department,
           row.Region,
           row.Branch,
+          row.Location,
           row.Description,
           row.Status,
           row.Category,
@@ -651,7 +764,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       console.error("Failed to export activities:", error)
       showToast.error("Failed to export activities")
     }
-  }, [displayActivities])
+  }, [displayActivities, locationHelper])
 
   const handleViewActivityDetails = (activity: any) => {
     setSelectedActivity(activity)
@@ -808,6 +921,42 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
               </Card>
             </div>
 
+            {/* Location Distribution Card - Only show for SUPER_ADMIN */}
+            {isSuperAdmin && Object.keys(locationStats).length > 0 && (
+              <Card className="border-none shadow-sm">
+                <CardHeader>
+                  <div className="flex items-center gap-2">
+                    <MapPin className="text-purple-600" size={18} />
+                    <CardTitle className="text-lg font-bold">Location Distribution</CardTitle>
+                  </div>
+                  <CardDescription>Employee distribution by region and branch</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    {Object.entries(locationStats).map(([region, data]) => (
+                      <div key={region} className="border rounded-lg p-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <Building className="text-slate-500" size={16} />
+                            <span className="font-medium">{region}</span>
+                          </div>
+                          <Badge variant="outline">{data.count} employees</Badge>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                          {Object.entries(data.branches).map(([branch, count]) => (
+                            <div key={branch} className="flex items-center justify-between text-sm p-2 bg-slate-50 rounded">
+                              <span className="text-slate-600">{branch}</span>
+                              <span className="font-medium">{count}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Main Content Area */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <Card className="lg:col-span-2 border-none shadow-sm">
@@ -910,6 +1059,9 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             }}
             getDepartmentName={getDepartmentName}
             canManageUser={canManageUser}
+            getFullLocation={locationHelper.getFullLocation}
+            regions={REGIONS}
+            getAvailableBranches={locationHelper.getAvailableBranches}
           />
         )
       case "activities":
@@ -924,10 +1076,11 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             isSuperAdmin={isSuperAdmin}
             isLineManager={isLineManager}
             onFilterChange={(newFilters) => {
-              // Convert 'all' status to empty string
               const normalizedFilters: ActivitiesFilters = {
                 ...newFilters,
-                status: newFilters.status === 'all' ? '' : newFilters.status
+                status: newFilters.status === 'all' ? '' : newFilters.status,
+                region: newFilters.region || "",
+                branch: newFilters.branch || "",
               }
               setActivitiesFilters(normalizedFilters)
               loadActivitiesData(normalizedFilters)
@@ -935,6 +1088,8 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             onRefresh={() => loadActivitiesData()}
             onExport={handleExportActivities}
             onViewDetails={handleViewActivityDetails}
+            regions={REGIONS}
+            getAvailableBranches={locationHelper.getAvailableBranches}
           />
         )
       case "departments":
@@ -981,6 +1136,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
               toggleModal('unlock', true); 
             }}
             canManageUser={canManageUser}
+            getFullLocation={locationHelper.getFullLocation}
           />
         )
       case "analytics":

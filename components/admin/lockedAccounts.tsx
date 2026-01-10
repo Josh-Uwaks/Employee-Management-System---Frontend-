@@ -11,7 +11,9 @@ import {
   UserX, 
   ShieldAlert,
   Calendar,
-  Clock
+  Clock,
+  MapPin,
+  Building
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -21,6 +23,8 @@ interface LockedAccountsProps {
   formatDate: (date?: string | null) => string
   onUnlock: (account: any) => void
   canManageUser: (employee: Employee) => boolean
+  // New optional prop for location display
+  getFullLocation?: (employee: Employee) => string
 }
 
 export default function LockedAccounts({
@@ -29,9 +33,22 @@ export default function LockedAccounts({
   formatDate,
   onUnlock,
   canManageUser,
+  getFullLocation,
 }: LockedAccountsProps) {
 
   console.log("Locked Accounts:", lockedAccounts);
+
+  // Helper function to get location display
+  const getLocationDisplay = (account: any): string => {
+    if (getFullLocation) {
+      return getFullLocation(account as Employee);
+    }
+    // Fallback if getFullLocation is not provided
+    if (account.region && account.branch) {
+      return `${account.region} - ${account.branch}`;
+    }
+    return account.region || account.branch || "Not specified";
+  };
   
   return (
     <Card className="border-none shadow-sm">
@@ -108,6 +125,7 @@ export default function LockedAccounts({
               {lockedAccounts.map((account) => {
                 const restricted = !canManageUser(account as Employee)
                 const isSuperAdmin = account.role === "SUPER_ADMIN"
+                const hasLocation = account.region || account.branch;
                 
                 return (
                   <div 
@@ -171,7 +189,7 @@ export default function LockedAccounts({
                             </div>
                           )}
                           
-                          <div className="flex flex-wrap gap-4 text-xs text-slate-500">
+                          <div className="flex flex-wrap gap-3 text-xs text-slate-500">
                             <div className="flex items-center gap-1">
                               <Calendar size={12} />
                               <span>Locked: {formatDate(account.lockedAt)}</span>
@@ -180,6 +198,38 @@ export default function LockedAccounts({
                               <UserX size={12} />
                               <span>ID: {account.id_card}</span>
                             </div>
+                            
+                            {/* Location Display */}
+                            {hasLocation && (
+                              <div className="flex items-center gap-1">
+                                <MapPin size={12} />
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className="cursor-help border-b border-dashed border-slate-300">
+                                      {getLocationDisplay(account)}
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top">
+                                    <div className="space-y-1">
+                                      <p className="text-sm flex items-center gap-1">
+                                        <Building size={12} />
+                                        Region: {account.region || "Not specified"}
+                                      </p>
+                                      <p className="text-sm flex items-center gap-1">
+                                        <MapPin size={12} />
+                                        Branch: {account.branch || "Not specified"}
+                                      </p>
+                                      {getFullLocation && (
+                                        <p className="text-sm font-medium mt-1 pt-1 border-t border-slate-200">
+                                          Location: {getFullLocation(account as Employee)}
+                                        </p>
+                                      )}
+                                    </div>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </div>
+                            )}
+                            
                             {account.email && (
                               <div className="flex items-center gap-1 truncate max-w-[180px]">
                                 <span className="text-slate-400">•</span>
@@ -241,6 +291,12 @@ export default function LockedAccounts({
                     <div className="w-2 h-2 rounded-full bg-amber-500"></div>
                     <span>Restricted Access</span>
                   </div>
+                  {lockedAccounts.some(a => a.region || a.branch) && (
+                    <div className="flex items-center gap-1">
+                      <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                      <span>Location Info</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

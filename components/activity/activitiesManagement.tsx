@@ -27,6 +27,7 @@ import {
 import { cn } from "@/lib/utils"
 import { showToast } from "@/lib/toast"
 
+// In ActivitiesManagementProps interface, update the type:
 interface ActivitiesManagementProps {
   activities: DailyActivity[]
   stats: any
@@ -40,6 +41,8 @@ interface ActivitiesManagementProps {
   onRefresh: () => void
   onExport: () => void
   onViewDetails: (activity: DailyActivity) => void
+  regions: readonly string[]
+  getAvailableBranches: (region: string) => string[] // Keep as string[] for flexibility
 }
 
 export default function ActivitiesManagement({
@@ -54,7 +57,9 @@ export default function ActivitiesManagement({
   onFilterChange,
   onRefresh,
   onExport,
-  onViewDetails
+  onViewDetails,
+  regions,
+  getAvailableBranches
 }: ActivitiesManagementProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [localFilters, setLocalFilters] = useState({
@@ -69,12 +74,11 @@ export default function ActivitiesManagement({
 
   const [selectedUser, setSelectedUser] = useState<string>("")
 
-  // Extract unique values for filters - WITH NULL CHECKS
+  // Extract unique values for filters - as strings
   const uniqueRegions = Array.from(new Set(activities
     .map(a => {
-      // Safe check for user object and region property
       if (a.user && typeof a.user === 'object' && a.user.region) {
-        return a.user.region;
+        return a.user.region as string;
       }
       return null;
     })
@@ -83,9 +87,8 @@ export default function ActivitiesManagement({
 
   const uniqueBranches = Array.from(new Set(activities
     .map(a => {
-      // Safe check for user object and branch property
       if (a.user && typeof a.user === 'object' && a.user.branch) {
-        return a.user.branch;
+        return a.user.branch as string;
       }
       return null;
     })
@@ -94,7 +97,6 @@ export default function ActivitiesManagement({
 
   // Fixed: Properly deduplicate users by their ID with comprehensive null checks
   const uniqueUsers = activities.reduce((acc, activity) => {
-    // Check if user exists and is an object with required properties
     if (activity.user && 
         typeof activity.user === 'object' && 
         activity.user._id && 
@@ -102,7 +104,6 @@ export default function ActivitiesManagement({
       
       const userId = activity.user._id;
       
-      // Check if user already exists in accumulator
       const existingUser = acc.find(u => u.id === userId);
       
       if (!existingUser) {
@@ -219,6 +220,25 @@ export default function ActivitiesManagement({
     } catch {
       return 'Invalid Time'
     }
+  }
+
+  // Get filtered branches based on selected region
+  const getFilteredBranches = () => {
+    if (localFilters.region === "all") {
+      return uniqueBranches;
+    }
+    
+    // If we have available branches from props, use those
+    if (getAvailableBranches) {
+      const availableBranches = getAvailableBranches(localFilters.region);
+      // Filter to only show branches that exist in the data
+      return availableBranches.filter(branch => 
+        uniqueBranches.includes(branch)
+      );
+    }
+    
+    // Fallback: return all unique branches
+    return uniqueBranches;
   }
 
   return (
@@ -399,9 +419,7 @@ export default function ActivitiesManagement({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Branches</SelectItem>
-                  {uniqueBranches.filter(branch => 
-                    localFilters.region === "all" || branch.includes(localFilters.region)
-                  ).map(branch => (
+                  {getFilteredBranches().map(branch => (
                     <SelectItem key={branch} value={branch}>
                       <div className="flex items-center gap-2">
                         <Building2 className="h-4 w-4" />
@@ -505,7 +523,7 @@ export default function ActivitiesManagement({
                         </div>
                       </div>
                       
-                      {/* User Info - WITH NULL CHECKS */}
+                      {/* User Info */}
                       {activity.user && typeof activity.user === 'object' && (
                         <div className="space-y-1 pt-2 border-t">
                           <div className="flex items-center gap-2">
@@ -521,13 +539,13 @@ export default function ActivitiesManagement({
                             {activity.user.region && (
                               <Badge variant="outline" className="text-xs">
                                 <MapPin className="h-3 w-3 mr-1" />
-                                {activity.user.region}
+                                {activity.user.region as string}
                               </Badge>
                             )}
                             {activity.user.branch && (
                               <Badge variant="outline" className="text-xs">
                                 <Building2 className="h-3 w-3 mr-1" />
-                                {activity.user.branch}
+                                {activity.user.branch as string}
                               </Badge>
                             )}
                           </div>
