@@ -36,7 +36,6 @@ interface ActivitiesContextType {
   loadTodayActivities: () => Promise<void>
   loadPersonalActivitiesByDateRange: (startDate: string, endDate: string, filters?: {
     status?: 'pending' | 'ongoing' | 'completed';
-    category?: 'work' | 'meeting' | 'training' | 'break' | 'other';
   }) => Promise<void>
   
   // Admin Activities Functions
@@ -58,8 +57,6 @@ interface ActivitiesContextType {
   
   // Status Functions
   getStatusColor: (status: string) => string
-  getPriorityColor: (priority?: string) => string
-  getCategoryIcon: (category?: string) => string
   
   // Refresh function
   refreshActivities: () => void
@@ -99,28 +96,6 @@ export const ActivitiesProvider = ({ children }: { children: ReactNode }) => {
       case 'ongoing': return 'bg-blue-100 text-blue-800 border-blue-200'
       case 'pending': return 'bg-yellow-100 text-yellow-800 border-yellow-200'
       default: return 'bg-gray-100 text-gray-800 border-gray-200'
-    }
-  }, [])
-
-  const getPriorityColor = useCallback((priority?: string): string => {
-    if (!priority) return 'bg-gray-100 text-gray-800 border-gray-200'
-    
-    switch (priority.toLowerCase()) {
-      case 'high': return 'bg-red-100 text-red-800 border-red-200'
-      case 'medium': return 'bg-yellow-100 text-yellow-800 border-yellow-200'
-      case 'low': return 'bg-green-100 text-green-800 border-green-200'
-      default: return 'bg-gray-100 text-gray-800 border-gray-200'
-    }
-  }, [])
-
-  const getCategoryIcon = useCallback((category?: string): string => {
-    switch (category?.toLowerCase()) {
-      case 'meeting': return '👥'
-      case 'training': return '📚'
-      case 'break': return '☕'
-      case 'work': return '💼'
-      case 'other': return '📝'
-      default: return '📋'
     }
   }, [])
 
@@ -376,7 +351,6 @@ export const ActivitiesProvider = ({ children }: { children: ReactNode }) => {
     endDate: string, 
     filters?: {
       status?: 'pending' | 'ongoing' | 'completed';
-      category?: 'work' | 'meeting' | 'training' | 'break' | 'other';
     }
   ): Promise<void> => {
     try {
@@ -387,6 +361,7 @@ export const ActivitiesProvider = ({ children }: { children: ReactNode }) => {
       
       if (response.success) {
         setPersonalActivities(response.data || [])
+        console.log('loadPersonalActivitiesByDateRange response:', { startDate, endDate, count: response.data?.length, sample: response.data?.slice(0,3) })
         
         // Transform stats from backend
         if (response.stats) {
@@ -568,8 +543,6 @@ export const ActivitiesProvider = ({ children }: { children: ReactNode }) => {
       
       // Helper Functions
       getStatusColor,
-      getPriorityColor,
-      getCategoryIcon,
       
       // Refresh function
       refreshActivities,

@@ -35,8 +35,8 @@ export interface Employee {
   department?: Department | string;
   position?: string;
   reportsTo?: any;
-  region?: Region;  // Updated
-  branch?: Branch;  // Updated
+  region?: Region;
+  branch?: Branch;
   is_active: boolean;
   isAdmin: boolean;
   isLocked: boolean;
@@ -45,8 +45,8 @@ export interface Employee {
   lockedAt?: string | null; 
   lockedReason?: string | null;
   lastCheckinAt?: string | null;
-  lastCheckinRegion?: Region | null;  // Updated
-  lastCheckinBranch?: Branch | null;  // Updated
+  lastCheckinRegion?: Region | null;
+  lastCheckinBranch?: Branch | null;
   otp?: string | null;
   otpExpiresAt?: string | null;
   createdAt?: string;
@@ -54,9 +54,41 @@ export interface Employee {
 }
 
 // Add a helper function for location validation
+// Add a helper function for location validation
 export const validateLocation = (region: Region, branch: Branch): boolean => {
+  // Check if region exists in BRANCHES
+  if (!BRANCHES[region]) {
+    return false;
+  }
+  
   const validBranches = BRANCHES[region] as readonly Branch[] | undefined;
-  return Boolean(validBranches && validBranches.includes(branch));
+  
+  // If no branches defined for this region
+  if (!validBranches || validBranches.length === 0) {
+    return false;
+  }
+  
+  // Check if branch is included in valid branches
+  return validBranches.includes(branch);
+};
+
+// Add a more flexible validation function that accepts strings
+export const isValidLocationCombo = (region: string, branch: string): boolean => {
+  if (!region || !branch || region.trim() === '' || branch.trim() === '') {
+    return false;
+  }
+  
+  // Convert to proper types
+  const regionType = region as Region;
+  const branchType = branch as Branch;
+  
+  // Check if it's a valid Region type
+  if (!REGIONS.includes(regionType)) {
+    return false;
+  }
+  
+  // Check if branch is valid for this region
+  return validateLocation(regionType, branchType);
 };
 
 // Add a function to get available branches for a region
@@ -72,9 +104,6 @@ export interface DailyActivity {
   timeInterval: string;
   description: string;
   status: 'pending' | 'ongoing' | 'completed';
-  category?: 'work' | 'meeting' | 'training' | 'break' | 'other';
-  priority?: 'low' | 'medium' | 'high';
-  duration?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -217,6 +246,57 @@ export const updateUser = async (userId: string, data: Partial<Employee>): Promi
     );
   }
 };
+
+/**
+ * Delete user (Super Admin only)
+ */
+export const deleteUser = async (userId: string): Promise<{
+  success: boolean;
+  message: string;
+  data: {
+    id: string;
+    id_card: string;
+    email: string;
+    name: string;
+  };
+  deletedBy: {
+    id_card: string;
+    name: string;
+    role: string;
+  };
+}> => {
+  try {
+    const res = await api.delete<any>(`/users/${userId}`);
+    
+    if (!res.data.success) {
+      throw new Error(res.data.message || "Failed to delete user");
+    }
+    
+    return res.data;
+  } catch (error: any) {
+    console.error("deleteUser error:", error.response?.data || error.message);
+    
+    // Handle specific error cases
+    if (error?.response?.status === 403) {
+      throw new Error("Only SUPER_ADMIN can delete users");
+    } else if (error?.response?.status === 404) {
+      throw new Error("User not found");
+    } else if (error?.response?.status === 400) {
+      if (error?.response?.data?.message?.includes('your own account')) {
+        throw new Error("Cannot delete your own account");
+      } else if (error?.response?.data?.message?.includes('SUPER_ADMIN')) {
+        throw new Error("Cannot delete another SUPER_ADMIN account");
+      }
+    }
+    
+    throw new Error(
+      error?.response?.data?.message ||
+      error?.message ||
+      "Failed to delete user"
+    );
+  }
+};
+
 
 /* =========================
    Department Management API Calls
@@ -503,7 +583,37 @@ export const getActivitiesByUser = async (userId: string, params?: {
   limit?: number;
 }): Promise<ActivitiesResponse> => {
   try {
-    const res = await api.get<ActivitiesResponse>(`/activities/user/${userId}`, { params });
+    // Clean up params before sending - remove empty/null/undefined values
+    const cleanedParams: any = {};
+    
+    if (params) {
+      Object.keys(params).forEach(key => {
+        const value = (params as any)[key];
+        
+        // Only include values that are not empty/null/undefined
+        if (value !== undefined && value !== null && value !== '' && 
+            value !== 'null' && value !== 'undefined') {
+          
+          // For page and limit, always include them (they have defaults)
+          if (key === 'page' || key === 'limit') {
+            cleanedParams[key] = value;
+          } 
+          // For date and status, only include if they have meaningful values
+          else if (key === 'date' && value.trim() !== '') {
+            cleanedParams[key] = value;
+          } 
+          else if (key === 'status' && value.trim() !== '') {
+            cleanedParams[key] = value;
+          }
+        }
+      });
+    }
+
+    console.log('[DEBUG] getActivitiesByUser params:', { original: params, cleaned: cleanedParams });
+    
+    const res = await api.get<ActivitiesResponse>(`/activities/user/${userId}`, { 
+      params: cleanedParams 
+    });
     
     if (!res.data.success) {
       throw new Error(res.data.message || "Failed to fetch user activities");
@@ -525,6 +635,7 @@ export const getActivitiesByUser = async (userId: string, params?: {
       apiError.error = 'USER_NOT_FOUND';
     } else if (error?.response?.status === 400) {
       apiError.error = 'VALIDATION_ERROR';
+      apiError.details = error.response?.data?.details;
     }
     
     throw apiError;
@@ -538,6 +649,7 @@ export const adminApi = {
   getAllUsers,
   getUserById,
   updateUser,
+  deleteUser,
   getAllDepartments,
   getDepartmentById,
   createDepartment,

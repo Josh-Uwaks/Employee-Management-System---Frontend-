@@ -34,10 +34,11 @@ interface DepartmentManagementProps {
   isLoading: boolean
   isActionLoading: boolean
   onSearchChange: (query: string) => void
-  onCreateDepartment: () => void
-  onEditDepartment: (department: Department) => void
-  onToggleStatus: (departmentId: string) => void
-  onDeleteDepartment: (department: Department) => void
+  onCreateDepartment?: () => void
+  onViewDepartment: (department: Department) => void  // Read-only view still requires view callback
+  onEditDepartment?: (department: Department) => void
+  onToggleStatus?: (departmentId: string) => void
+  onDeleteDepartment?: (department: Department) => void
 }
 
 export default function DepartmentManagement({
@@ -48,6 +49,7 @@ export default function DepartmentManagement({
   isActionLoading,
   onSearchChange,
   onCreateDepartment,
+  onViewDepartment,  // Add this line
   onEditDepartment,
   onToggleStatus,
   onDeleteDepartment,
@@ -117,13 +119,15 @@ export default function DepartmentManagement({
           />
         </div>
         
-        <Button
-          onClick={onCreateDepartment}
-          className="gap-2 bg-[#ec3338] hover:bg-[#d42c31] shadow-sm text-white"
-        >
-          <Plus className="h-4 w-4" />
-          Create New Department
-        </Button>
+        {onCreateDepartment && (
+          <Button
+            onClick={onCreateDepartment}
+            className="gap-2 bg-[#ec3338] hover:bg-[#d42c31] shadow-sm text-white"
+          >
+            <Plus className="h-4 w-4" />
+            Create New Department
+          </Button>
+        )}
       </div>
 
       {/* Stats Summary */}
@@ -179,7 +183,7 @@ export default function DepartmentManagement({
               ? "Try adjusting your search term" 
               : "Create your first department to organize your staff"}
           </p>
-          {!searchQuery && (
+          {!searchQuery && onCreateDepartment && (
             <Button 
               onClick={onCreateDepartment}
               className="gap-2 border-[#ec3338]/20 text-[#ec3338] hover:bg-[#ec3338]/5"
@@ -294,42 +298,48 @@ export default function DepartmentManagement({
                 </div>
                 
                 <div className="flex flex-col sm:flex-row gap-2 flex-shrink-0">
+          
+                  
                   <Button 
                     variant="outline" 
                     size="sm" 
                     className="gap-2 border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-all"
-                    onClick={() => onEditDepartment(dept)}
+                    onClick={() => onViewDepartment(dept)}
                     disabled={isActionLoading}
                   >
                     <Eye size={14} />
                     View
                   </Button>
                   
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    className="gap-2 border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-all"
-                    onClick={() => onEditDepartment(dept)}
-                    disabled={isActionLoading}
-                  >
-                    <Edit2 size={14} />
-                    Edit
-                  </Button>
+                  {onEditDepartment && (
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="gap-2 border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-all"
+                      onClick={() => onEditDepartment(dept)}
+                      disabled={isActionLoading}
+                    >
+                      <Edit2 size={14} />
+                      Edit
+                    </Button>
+                  )}
                   
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    className={cn(
-                      "gap-2 transition-all",
-                      dept.isActive 
-                        ? "border-amber-200 text-amber-700 hover:bg-amber-50 hover:text-amber-800 hover:border-amber-300" 
-                        : "border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 hover:border-emerald-300"
-                    )}
-                    onClick={() => onToggleStatus(dept._id)}
-                    disabled={isActionLoading}
-                  >
-                    {dept.isActive ? "Disable" : "Enable"}
-                  </Button>
+                  {onToggleStatus && (
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className={cn(
+                        "gap-2 transition-all",
+                        dept.isActive 
+                          ? "border-amber-200 text-amber-700 hover:bg-amber-50 hover:text-amber-800 hover:border-amber-300" 
+                          : "border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 hover:border-emerald-300"
+                      )}
+                      onClick={() => onToggleStatus(dept._id)}
+                      disabled={isActionLoading}
+                    >
+                      {dept.isActive ? "Disable" : "Enable"}
+                    </Button>
+                  )}
                   
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -352,12 +362,29 @@ export default function DepartmentManagement({
                       </DropdownMenuItem>
                       <DropdownMenuItem 
                         className="gap-2 text-xs text-red-600 cursor-pointer"
-                        disabled={hasStaff || isActionLoading}
-                        onClick={() => onDeleteDepartment(dept)}
+                        onClick={() => onViewDepartment(dept)}
                       >
-                        <Trash2 size={14} />
-                        Delete Department
+                        <Eye size={14} />
+                        View Details
                       </DropdownMenuItem>
+                      <DropdownMenuItem className="gap-2 text-xs cursor-pointer">
+                        <ExternalLink size={14} />
+                        Staff List
+                      </DropdownMenuItem>
+                      {onDeleteDepartment ? (
+                        <DropdownMenuItem 
+                          className="gap-2 text-xs text-red-600 cursor-pointer"                        disabled={hasStaff || isActionLoading}
+                          onClick={() => onDeleteDepartment(dept)}
+                        >
+                          <Trash2 size={14} />
+                          Delete Department
+                        </DropdownMenuItem>
+                      ) : (
+                        <DropdownMenuItem className="gap-2 text-xs text-red-400 cursor-not-allowed" disabled>
+                          <Trash2 size={14} />
+                          Delete (restricted)
+                        </DropdownMenuItem>
+                      )}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>

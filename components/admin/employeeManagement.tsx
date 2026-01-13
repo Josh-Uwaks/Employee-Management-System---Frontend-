@@ -7,7 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Button } from "@/components/ui/button"
 import { 
   Search, MapPin, ShieldCheck, Edit, XCircle, 
-  CheckCircle, Lock, Unlock, ShieldAlert, UserPlus,
+  CheckCircle, Lock, Unlock, ShieldAlert, UserPlus, UserX,
   Filter, Users, UserCog, Mail, Calendar,
   Building2, MapPin as MapIcon, Eye, AlertCircle
 } from "lucide-react"
@@ -28,6 +28,7 @@ interface EmployeeManagementProps {
   onLock: (employee: Employee) => void
   getDepartmentName: (employee: Employee) => string
   canManageUser: (employee: Employee) => boolean
+  onDelete?: (employee: Employee) => void
   canRegisterUser?: boolean
   onRegisterUser?: () => void
   // Updated location props - make them more flexible
@@ -44,6 +45,7 @@ export default function EmployeeManagement({
   statusFilter,
   isLoading,
   isActionLoading,
+  authUser,
   onSearchChange,
   onStatusFilterChange,
   onEdit,
@@ -51,6 +53,7 @@ export default function EmployeeManagement({
   onLock,
   getDepartmentName,
   canManageUser,
+  onDelete,
   canRegisterUser,
   onRegisterUser,
   // Updated location props with defaults
@@ -92,6 +95,9 @@ export default function EmployeeManagement({
   const lockedCount = employees.filter(emp => emp.isLocked).length
   const activeCount = employees.filter(emp => !emp.isLocked && emp.isVerified && emp.is_active).length
   const unverifiedCount = employees.filter(emp => !emp.isVerified).length
+
+  // Viewer role helper
+  const isSuperAdmin = authUser?.role === "SUPER_ADMIN"
 
   if (isLoading) {
     return (
@@ -218,7 +224,7 @@ export default function EmployeeManagement({
             <div className="space-y-3">
               {filteredEmployees.map((emp) => {
                 const isRestricted = !canManageUser(emp)
-                const isSuperAdmin = emp.role === "SUPER_ADMIN"
+                const isEmployeeSuperAdmin = emp.role === "SUPER_ADMIN"
                 
                 return (
                   <div 
@@ -235,7 +241,7 @@ export default function EmployeeManagement({
                     )}
                   >
                     <div className="flex items-start gap-4 mb-4 sm:mb-0">
-                      <div className="flex-shrink-0">
+                      <div className="shrink-0">
                         <div className={cn(
                           "w-12 h-12 rounded-full flex items-center justify-center border font-bold text-white",
                           isRestricted 
@@ -259,21 +265,21 @@ export default function EmployeeManagement({
                               variant="outline" 
                               className={cn(
                                 "text-[10px] px-1.5 py-0",
-                                isSuperAdmin 
+                                isEmployeeSuperAdmin 
                                   ? "border-indigo-200 bg-indigo-50 text-indigo-700" 
                                   : "border-blue-200 bg-blue-50 text-blue-700"
                               )}
                             >
                               {emp.role}
                             </Badge>
-                            {isSuperAdmin && (
+                            {isEmployeeSuperAdmin && (
                               <Badge 
                                 className="text-[10px] px-1.5 py-0 bg-amber-100 text-amber-700 border-amber-200"
                               >
                                 <ShieldCheck className="w-3 h-3 mr-1" />
                                 Admin
                               </Badge>
-                            )}
+                            )} 
                           </div>
                         </div>
                         
@@ -350,7 +356,7 @@ export default function EmployeeManagement({
                       </div>
                     </div>
                     
-                    <div className="flex flex-col sm:flex-row gap-2 flex-shrink-0">
+                    <div className="flex flex-col sm:flex-row gap-2 shrink-0">
                       {isRestricted ? (
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -418,6 +424,19 @@ export default function EmployeeManagement({
                             {emp.isLocked ? <Unlock size={14} /> : <Lock size={14} />}
                             {emp.isLocked ? "Unlock" : "Lock"}
                           </Button>
+
+                          {isSuperAdmin && (
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="gap-2 border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-800 hover:border-rose-300"
+                              onClick={() => onDelete && onDelete(emp)}
+                              disabled={isActionLoading}
+                            >
+                              <UserX size={14} />
+                              Delete
+                            </Button>
+                          )}
                         </>
                       )}
                     </div>

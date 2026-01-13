@@ -12,9 +12,6 @@ export interface DailyActivity {
   timeInterval: string;
   description: string;
   status: 'pending' | 'ongoing' | 'completed';
-  category?: 'work' | 'meeting' | 'training' | 'break' | 'other';
-  priority?: 'low' | 'medium' | 'high';
-  duration?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -23,16 +20,12 @@ export interface CreateActivityData {
   timeInterval: string;
   description: string;
   status?: 'pending' | 'ongoing' | 'completed';
-  category?: 'work' | 'meeting' | 'training' | 'break' | 'other';
-  priority?: 'low' | 'medium' | 'high';
 }
 
 export interface UpdateActivityData {
   timeInterval?: string;
   description?: string;
   status?: 'pending' | 'ongoing' | 'completed';
-  category?: 'work' | 'meeting' | 'training' | 'break' | 'other';
-  priority?: 'low' | 'medium' | 'high';
 }
 
 interface ActivitiesResponse {
@@ -147,12 +140,10 @@ export const getTodayActivities = async (): Promise<ActivitiesResponse> => {
  */
 export const getActivitiesByDateRange = async (startDate: string, endDate: string, filters?: {
   status?: 'pending' | 'ongoing' | 'completed';
-  category?: 'work' | 'meeting' | 'training' | 'break' | 'other';
 }): Promise<ActivitiesResponse> => {
   try {
     const params: any = { startDate, endDate };
     if (filters?.status) params.status = filters.status;
-    if (filters?.category) params.category = filters.category;
     
     const response = await api.get<ActivitiesResponse>('/activities', { params });
     

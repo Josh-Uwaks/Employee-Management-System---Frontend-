@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from "react"
 import { useAuth } from "@/context/authContext"
 import { useAdmin } from "@/context/adminContext"
 import { useActivities } from "@/context/activitiesContext"
-import { Employee, Department, REGIONS, BRANCHES, validateLocation, getBranchesForRegion, Region, Branch } from "@/lib/admin"
+import { Employee, Department, REGIONS, BRANCHES, validateLocation, getBranchesForRegion, Region, Branch, isValidLocationCombo } from "@/lib/admin"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -34,9 +34,11 @@ import ActivitiesManagement from "@/components/activity/activitiesManagement"
 import EditUserDialog from "@/components/admin/dialogs/editUserDialog"
 import LockUserDialog from "@/components/admin/dialogs/lockUserDialog"
 import UnlockUserDialog from "@/components/admin/dialogs/unlockUserDialog"
+import DeleteUserDialog from "@/components/admin/dialogs/deleteUserDialog"
 import CreateDepartmentDialog from "@/components/admin/dialogs/createDepartmentDialog"
 import EditDepartmentDialog from "@/components/admin/dialogs/editDepartmentDialog"
 import DeleteDepartmentDialog from "@/components/admin/dialogs/deleteDepartmentDialog"
+import ViewDepartmentDialog from "@/components/admin/dialogs/viewDepartmentDialog"
 import RegisterUserDialog from "@/components/admin/dialogs/registerUserDialog"
 import ActivityDetailsDialog from "@/components/activity/activityDetailsDialog"
 
@@ -61,8 +63,8 @@ type ViewItem = {
 interface ActivitiesFilters {
   date: string;
   status: string;
-  region: Region | "";
-  branch: Branch | "";
+  region: Region | "" | "all";
+  branch: Branch | "" | "all";
   page: number;
   limit: number;
 }
@@ -82,6 +84,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     lockUserAccount,
     unlockUserAccount,
     updateUser,
+    deleteUser,
     createDepartment,
     updateDepartment,
     deleteDepartment,
@@ -96,7 +99,8 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     adminActivitiesLoading,
     adminActivitiesError,
     loadAllActivities,
-    loadActivitiesByUser
+    loadActivitiesByUser,
+    getStatusColor
   } = useActivities()
 
   const [activeView, setActiveView] = useState<"overview" | "employees" | "activities" | "departments" | "locked" | "analytics">("overview")
@@ -153,7 +157,9 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     editDept: false,
     deleteDept: false,
     register: false,
-    activityDetails: false
+    activityDetails: false,
+    delete: false,
+    viewDept: false
   })
 
   const userName = authUser ? `${authUser.first_name} ${authUser.last_name}` : "Administrator"
@@ -164,8 +170,33 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   
   // Use optimistic data when available, otherwise use fetched data
   const displayEmployees = optimisticEmployees.length > 0 ? optimisticEmployees : employees
-  const displayDepartments = isSuperAdmin ? (optimisticDepartments.length > 0 ? optimisticDepartments : departments) : []
+  const displayDepartments = (isSuperAdmin || isLineManager) ? (optimisticDepartments.length > 0 ? optimisticDepartments : departments) : []
   
+  // Employees that will be shown in ViewDepartmentDialog depending on viewer role
+  const viewDepartmentEmployees = useMemo(() => {
+    if (!selectedDepartment) return []
+    const deptId = selectedDepartment._id
+    let staff = displayEmployees.filter(emp => {
+      if (!emp.department) return false
+      if (typeof emp.department === 'string') return emp.department === deptId
+      return emp.department._id === deptId
+    })
+    if (isLineManager) {
+      staff = staff.filter(emp => emp.reportsTo && (typeof emp.reportsTo === 'string' ? emp.reportsTo === authUser?._id : emp.reportsTo._id === authUser?._id))
+    }
+    return staff
+  }, [selectedDepartment, displayEmployees, isLineManager, authUser?._id])
+
+  const viewDepartmentTotal = useMemo(() => {
+    if (!selectedDepartment) return 0
+    const deptId = selectedDepartment._id
+    return displayEmployees.filter(emp => {
+      if (!emp.department) return false
+      if (typeof emp.department === 'object') return emp.department._id === deptId
+      return emp.department === deptId
+    }).length
+  }, [selectedDepartment, displayEmployees])
+
   // Get activities to display based on role
   const getDisplayActivities = () => {
     if (isLineManager) {
@@ -304,14 +335,14 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       { id: "locked", label: "Locked Accounts", icon: Lock }
     ];
     
-    if (isSuperAdmin) {
+    if (isSuperAdmin || isLineManager) {
       baseViews.push({ id: "departments", label: "Departments", icon: Building2 });
     }
     
     baseViews.push({ id: "analytics", label: "Analytics", icon: BarChart3 });
     
     return baseViews;
-  }, [isSuperAdmin])
+  }, [isSuperAdmin, isLineManager])
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000)
@@ -338,7 +369,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       if (type === 'all' || !type) {
         promises.push(loadUsers())
         promises.push(loadLockedAccounts())
-        if (isSuperAdmin) {
+        if (isSuperAdmin || isLineManager) {
           promises.push(loadDepartments())
         }
         if (activeView === 'activities') {
@@ -347,7 +378,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       } else if (type === 'users') {
         promises.push(loadUsers())
         promises.push(loadLockedAccounts())
-      } else if (type === 'departments' && isSuperAdmin) {
+      } else if (type === 'departments' && (isSuperAdmin || isLineManager)) {
         promises.push(loadDepartments())
       } else if (type === 'activities') {
         promises.push(loadActivitiesData())
@@ -363,58 +394,67 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   }
 
   const loadActivitiesData = async (filters: ActivitiesFilters = activitiesFilters) => {
-    if (!isAdmin) return
-    
-    try {
-      // Create filtered params with proper typing
-      const filteredParams: any = {
-        date: filters.date || '',
-        status: filters.status === 'all' ? '' : filters.status,
-        region: filters.region || '',
-        branch: filters.branch || '',
-        page: filters.page,
-        limit: filters.limit
-      }
-
-      // Validate region-branch combination if both are provided
-      if (filters.region && filters.branch) {
-        const isValid = validateLocation(filters.region as Region, filters.branch as Branch);
-        if (!isValid) {
-          showToast.error("Invalid location filter combination");
-          return;
-        }
-      }
-
-      if (isLineManager) {
-        // LINE_MANAGER loads activities for their direct reports
-        const directReports = displayEmployees.filter(emp => 
-          emp.reportsTo && emp.reportsTo._id === authUser?._id
-        )
-        
-        // Apply location filter if specified
-        const filteredReports = filters.region 
-          ? directReports.filter(emp => emp.region === filters.region)
-          : directReports;
-        
-        // Load activities for each direct report
-        for (const report of filteredReports) {
-          await loadActivitiesByUser(report._id, {
-            date: filteredParams.date,
-            status: filteredParams.status,
-            page: filteredParams.page,
-            limit: filteredParams.limit
-          })
-        }
-      } else {
-        // SUPER_ADMIN loads all activities
-        await loadAllActivities(filteredParams)
-      }
-    } catch (error) {
-      console.error("Error loading activities:", error)
-      showToast.error("Failed to load activities")
+  // Allow LINE_MANAGER to load activities for their direct reports as well
+  if (!isAdmin && !isLineManager) return
+  
+  try {
+    // Create filtered params with proper typing
+    const filteredParams: any = {
+      date: filters.date || '',
+      status: filters.status === 'all' ? '' : filters.status,
+      region: filters.region || '',
+      branch: filters.branch || '',
+      page: filters.page,
+      limit: filters.limit
     }
-  }
 
+    // FIX: Validate region-branch combination only when BOTH are provided and not empty
+    if (filters.region && filters.branch && 
+        filters.region.trim() !== '' && filters.branch.trim() !== '' &&
+        filters.region !== 'all' && filters.branch !== 'all') {
+      
+      // Ensure they are valid types
+      if (!REGIONS.includes(filters.region as Region)) {
+        showToast.error(`Invalid region: ${filters.region}`);
+        return;
+      }
+      
+      const isValid = isValidLocationCombo(filters.region, filters.branch);
+      if (!isValid) {
+        showToast.error(`Invalid location filter combination: ${filters.region} - ${filters.branch}`);
+        return;
+      }
+    }
+
+    if (isLineManager) {
+      // LINE_MANAGER loads activities for their direct reports
+      const directReports = displayEmployees.filter(emp => 
+        emp.reportsTo && (typeof emp.reportsTo === 'string' ? emp.reportsTo === authUser?._id : emp.reportsTo._id === authUser?._id)
+      )
+      
+      // Apply location filter if specified
+      const filteredReports = filters.region && filters.region !== 'all'
+        ? directReports.filter(emp => emp.region === filters.region)
+        : directReports;
+      
+      // Load activities for each direct report
+      for (const report of filteredReports) {
+        await loadActivitiesByUser(report._id, {
+          date: filteredParams.date,
+          status: filteredParams.status,
+          page: filteredParams.page,
+          limit: filteredParams.limit
+        })
+      }
+    } else {
+      // SUPER_ADMIN loads all activities
+      await loadAllActivities(filteredParams)
+    }
+  } catch (error) {
+    console.error("Error loading activities:", error)
+    showToast.error("Failed to load activities")
+  }
+}
   const handleReloadData = async () => {
     showToast.info("Refreshing data...")
     await refetchData('all')
@@ -566,6 +606,32 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         showToast.error("Failed to update user")
       }
     }
+  }
+
+  const handleDeleteUser = async () => {
+    if (!selectedEmployee) return
+    
+    // Optimistically update UI
+    setOptimisticEmployees(prev => 
+      prev.filter(emp => emp._id !== selectedEmployee._id)
+    )
+    
+    try {
+      await deleteUser(selectedEmployee._id)
+      toggleModal('delete', false)
+      setSelectedEmployee(null)
+      showToast.success(`User ${selectedEmployee.first_name} ${selectedEmployee.last_name} deleted successfully`)
+      await refetchData('users')
+    } catch (error) {
+      // Revert optimistic update on error
+      setOptimisticEmployees([])
+      // Error is already handled in the context
+    }
+  }
+
+  const handleViewDepartment = (department: Department) => {
+    setSelectedDepartment(department)
+    toggleModal('viewDept', true)
   }
 
   const handleCreateDepartment = async () => {
@@ -725,14 +791,12 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
           : "N/A",
         Description: activity.description,
         Status: activity.status,
-        Category: activity.category || "N/A",
-        Priority: activity.priority || "N/A",
         Created: activity.createdAt,
         Updated: activity.updatedAt
       }))
 
       const csvContent = [
-        ['Date', 'Time', 'Employee', 'ID Card', 'Department', 'Region', 'Branch', 'Location', 'Description', 'Status', 'Category', 'Priority', 'Created', 'Updated'],
+        ['Date', 'Time', 'Employee', 'ID Card', 'Department', 'Region', 'Branch', 'Location', 'Description', 'Status', 'Created', 'Updated'],
         ...data.map(row => [
           row.Date,
           row.Time,
@@ -744,8 +808,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
           row.Location,
           row.Description,
           row.Status,
-          row.Category,
-          row.Priority,
           row.Created,
           row.Updated
         ])
@@ -895,30 +957,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                 </Card>
               )}
 
-              {/* System Health Card - Position based on role */}
-              <Card className={`border-none shadow-sm bg-gradient-to-br from-emerald-50 to-white ${isSuperAdmin ? '' : 'lg:col-span-1 md:col-span-1'}`}>
-                <CardContent className="p-6">
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium text-slate-600">System Health</p>
-                      <div className="flex items-center gap-2 mt-2">
-                        <CheckCircle2 className="text-emerald-600" size={24} />
-                        <p className="text-3xl font-bold text-slate-900">
-                          {stats.efficiency}%
-                        </p>
-                      </div>
-                    </div>
-                    <div className="p-3 bg-emerald-100 rounded-xl">
-                      <CheckCircle2 className="text-emerald-600" size={24} />
-                    </div>
-                  </div>
-                  <div className="mt-4 pt-4 border-t border-emerald-100">
-                    <p className="text-xs text-slate-500">
-                      Operational efficiency
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
+              
             </div>
 
             {/* Location Distribution Card - Only show for SUPER_ADMIN */}
@@ -1057,6 +1096,10 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
               setSelectedEmployee(emp); 
               emp.isLocked ? toggleModal('unlock', true) : toggleModal('lock', true); 
             }}
+            onDelete={(emp) => {
+              setSelectedEmployee(emp);
+              toggleModal('delete', true);
+            }}
             getDepartmentName={getDepartmentName}
             canManageUser={canManageUser}
             getFullLocation={locationHelper.getFullLocation}
@@ -1090,11 +1133,12 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             onViewDetails={handleViewActivityDetails}
             regions={REGIONS}
             getAvailableBranches={locationHelper.getAvailableBranches}
+            getStatusColor={getStatusColor}
           />
         )
       case "departments":
-        // Only SUPER_ADMIN can see department management
-        if (!isSuperAdmin) {
+        // SUPER_ADMIN can manage departments; LINE_MANAGER can view departments (read-only)
+        if (!isSuperAdmin && !isLineManager) {
           return (
             <div className="flex flex-col items-center justify-center py-16 text-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50">
               <div className="p-4 bg-white rounded-full shadow-sm mb-4">
@@ -1116,13 +1160,11 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             isLoading={isDepartmentLoading || isRefetching}
             isActionLoading={isActionLoading}
             onSearchChange={setSearchQuery}
-            onCreateDepartment={() => toggleModal('createDept', true)}
-            onEditDepartment={handleOpenEditDepartment}
-            onToggleStatus={handleToggleDepartmentStatus}
-            onDeleteDepartment={(dept) => { 
-              setSelectedDepartment(dept); 
-              toggleModal('deleteDept', true); 
-            }}
+            onCreateDepartment={isSuperAdmin ? () => toggleModal('createDept', true) : undefined}
+            onViewDepartment={handleViewDepartment}
+            onEditDepartment={isSuperAdmin ? handleOpenEditDepartment : undefined}
+            onToggleStatus={isSuperAdmin ? handleToggleDepartmentStatus : undefined}
+            onDeleteDepartment={isSuperAdmin ? (dept) => { setSelectedDepartment(dept); toggleModal('deleteDept', true); } : undefined}
           />
         )
       case "locked":
@@ -1267,6 +1309,14 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         isActionLoading={isActionLoading} 
         onUnlock={handleUnlockUser} 
       />
+
+      <DeleteUserDialog
+        open={modals.delete}
+        onOpenChange={(s) => toggleModal('delete', s)}
+        employee={selectedEmployee}
+        isActionLoading={isActionLoading}
+        onDelete={handleDeleteUser}
+      />
       
       {/* Department dialogs - Only for SUPER_ADMIN */}
       {isSuperAdmin && (
@@ -1296,6 +1346,14 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             isActionLoading={isActionLoading} 
             onDelete={handleDeleteDepartment} 
           />
+
+<ViewDepartmentDialog
+    open={modals.viewDept}
+    onOpenChange={(s) => toggleModal('viewDept', s)}
+    department={selectedDepartment}
+    employees={viewDepartmentEmployees}
+    totalStaffCount={viewDepartmentTotal}
+  />
         </>
       )}
 
@@ -1304,6 +1362,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         open={modals.activityDetails}
         onOpenChange={(s) => toggleModal('activityDetails', s)}
         activity={selectedActivity}
+        getStatusColor={getStatusColor}
       />
     </TooltipProvider>
   )

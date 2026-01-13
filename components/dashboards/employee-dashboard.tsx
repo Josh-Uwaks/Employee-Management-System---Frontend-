@@ -24,11 +24,20 @@ import { Badge } from "../ui/badge"
 const TIMEZONE = 'Africa/Lagos' 
 
 // Helper function to normalize dates for comparison
-const normalizeDateForComparison = (dateString: string | Date): string => {
-  const date = new Date(dateString)
-  // Convert to YYYY-MM-DD format in Lagos timezone
-  return date.toLocaleDateString('en-CA', { timeZone: TIMEZONE })
-}
+const normalizeDateForComparison = (dateInput: string | Date): string => {
+  const date = new Date(dateInput);
+  
+  // Convert to Nigeria time by adding 1 hour (UTC+1)
+  const nigeriaTime = new Date(date.getTime() + (60 * 60 * 1000));
+  
+  // Get UTC date of the adjusted time
+  const year = nigeriaTime.getUTCFullYear();
+  const month = String(nigeriaTime.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(nigeriaTime.getUTCDate()).padStart(2, '0');
+  
+  return `${year}-${month}-${day}`;
+};
+
 
 // Get dates with activities from personalActivities
 const getDatesWithActivity = (activities: any[]): Date[] => {
@@ -66,8 +75,6 @@ interface ActivityTableEntryHalfHour {
     status: "pending" | "ongoing" | "completed";
     timestamp: string;
     changeCount: number;
-    category?: string;
-    priority?: string;
   }>
 }
 
@@ -76,8 +83,6 @@ interface EditActivityData {
   timeInterval: string;
   description: string;
   status: 'pending' | 'ongoing' | 'completed';
-  category?: 'work' | 'meeting' | 'training' | 'break' | 'other';
-  priority?: 'low' | 'medium' | 'high';
 }
 
 // 🔑 Updated constants for a full 24-hour period (48 half-hour slots)
@@ -132,11 +137,60 @@ const getCurrentSlotIndexLagos = (): number => {
   return currentHourInLagos * 2 + Math.floor(currentMinuteInLagos / 30)
 }
 
+// Get minutes until next slot (0-30)
+const getMinutesUntilNextSlot = (): number => {
+  const now = new Date()
+  const lagosTime = new Intl.DateTimeFormat('en-US', { 
+    minute: 'numeric',
+    timeZone: TIMEZONE 
+  }).formatToParts(now)
+
+  const minutePart = lagosTime.find(p => p.type === 'minute')
+  const currentMinuteInLagos = minutePart ? parseInt(minutePart.value, 10) : now.getMinutes()
+  
+  // Calculate minutes past the current half-hour
+  const minutesPastHalfHour = currentMinuteInLagos % 30
+  // Minutes until next slot (next half-hour mark)
+  return 30 - minutesPastHalfHour
+}
+
+// Get seconds until next slot (0-60)
+const getSecondsUntilNextMinute = (): number => {
+  const now = new Date()
+  const lagosTime = new Intl.DateTimeFormat('en-US', { 
+    second: 'numeric',
+    timeZone: TIMEZONE 
+  }).formatToParts(now)
+
+  const secondPart = lagosTime.find(p => p.type === 'second')
+  const currentSecondInLagos = secondPart ? parseInt(secondPart.value, 10) : now.getSeconds()
+  
+  return 60 - currentSecondInLagos
+}
+
+// Get current time in Lagos with seconds
+const getCurrentLagosTime = (): string => {
+  const now = new Date()
+  return now.toLocaleTimeString('en-NG', { 
+    timeZone: TIMEZONE,
+    hour: '2-digit', 
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true 
+  })
+}
+
 // Convert time interval string to slot index
 const timeIntervalToSlotIndex = (timeInterval: string): number => {
   const [startTime] = timeInterval.split('-').map(t => t.trim())
   const [hours, minutes] = startTime.split(':').map(Number)
   return hours * 2 + Math.floor(minutes / 30)
+}
+
+// Check if work slot has ended for today
+const hasWorkSlotEndedToday = (): boolean => {
+  const currentSlotIndex = getCurrentSlotIndexLagos()
+  return currentSlotIndex >= WORK_SLOT_END
 }
 
 // --- MAIN DASHBOARD COMPONENT ---
@@ -152,7 +206,8 @@ export default function EmployeeDashboard({ onLogout }: EmployeeDashboardProps) 
     updatePersonalActivity,
     deletePersonalActivity,
     loadPersonalActivitiesByDateRange,
-    refreshActivities
+    refreshActivities,
+    getStatusColor
   } = useActivities()
   
   const [notifications, setNotifications] = useState<any[]>([])
@@ -171,14 +226,19 @@ export default function EmployeeDashboard({ onLogout }: EmployeeDashboardProps) 
   const [timeSlots, setTimeSlots] = useState<string[]>([])
   const [availableTimeSlots, setAvailableTimeSlots] = useState<string[]>([])
   const [currentSlotIndex, setCurrentSlotIndex] = useState<number>(0)
+  const [workSlotEnded, setWorkSlotEnded] = useState<boolean>(false)
+  
+  // New state for time countdown
+  const [minutesUntilNextSlot, setMinutesUntilNextSlot] = useState<number>(0)
+  const [secondsUntilNextMinute, setSecondsUntilNextMinute] = useState<number>(0)
+  const [currentTime, setCurrentTime] = useState<string>("")
+  const [countdownProgress, setCountdownProgress] = useState<number>(100)
 
   // State for edit modal
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [editingActivity, setEditingActivity] = useState<EditActivityData | null>(null)
   const [editDescription, setEditDescription] = useState("")
   const [editStatus, setEditStatus] = useState<'pending' | 'ongoing' | 'completed'>("pending")
-  const [editCategory, setEditCategory] = useState<'work' | 'meeting' | 'training' | 'break' | 'other'>("work")
-  const [editPriority, setEditPriority] = useState<'low' | 'medium' | 'high'>("medium")
 
   const todayNormalized = normalizeDateForComparison(new Date())
   const isToday = normalizeDateForComparison(selectedDate) === todayNormalized
@@ -211,14 +271,31 @@ export default function EmployeeDashboard({ onLogout }: EmployeeDashboardProps) 
     const slots = generateTimeSlots()
     setTimeSlots(slots)
     
+    // Initialize time countdown
+    updateTimeCountdown()
+    
+    // Check if work slot has ended
+    const ended = hasWorkSlotEndedToday()
+    setWorkSlotEnded(ended)
+    
     loadDashboardData()
     
+    // Update countdown every second
+    const timeInterval = setInterval(() => {
+      updateTimeCountdown()
+      const ended = hasWorkSlotEndedToday()
+      setWorkSlotEnded(ended)
+    }, 1000) // Update every second
+    
     // Refresh data every 5 minutes
-    const interval = setInterval(() => {
+    const dataInterval = setInterval(() => {
       loadDashboardData()
     }, 300000) // 5 minutes
     
-    return () => clearInterval(interval)
+    return () => {
+      clearInterval(timeInterval)
+      clearInterval(dataInterval)
+    }
   }, [userId, selectedDate, refreshKey])
 
   useEffect(() => {
@@ -228,7 +305,7 @@ export default function EmployeeDashboard({ onLogout }: EmployeeDashboardProps) 
       // For past dates, all slots are available for viewing but not for logging
       setAvailableTimeSlots(timeSlots)
     }
-  }, [isToday, timeSlots])
+  }, [isToday, timeSlots, workSlotEnded])
 
   useEffect(() => {
     // Update activity dates when personal activities change
@@ -240,43 +317,83 @@ export default function EmployeeDashboard({ onLogout }: EmployeeDashboardProps) 
   }, [personalActivities, selectedDate, currentSlotIndex])
 
   useEffect(() => {
+    console.log('DEBUG - All personal activities:', personalActivities.map(a => ({
+      date: a.date,
+      timeInterval: a.timeInterval,
+      slotIndex: timeIntervalToSlotIndex(a.timeInterval),
+      inWorkHours: timeIntervalToSlotIndex(a.timeInterval) >= WORK_SLOT_START && 
+                   timeIntervalToSlotIndex(a.timeInterval) < WORK_SLOT_END
+    })));
+  }, [personalActivities]);
+
+  useEffect(() => {
     // Calculate missed slots whenever activities or date changes
     calculateMissedSlots()
   }, [personalActivities, selectedDate, currentSlotIndex])
+
+  const updateTimeCountdown = () => {
+    const minutes = getMinutesUntilNextSlot()
+    const seconds = getSecondsUntilNextMinute()
+    const time = getCurrentLagosTime()
+    
+    setMinutesUntilNextSlot(minutes)
+    setSecondsUntilNextMinute(seconds)
+    setCurrentTime(time)
+    
+    // Calculate progress percentage (0-100%)
+    // Progress decreases as we get closer to next slot
+    const progress = ((minutes * 60 + seconds) / (30 * 60)) * 100
+    setCountdownProgress(progress)
+  }
 
   const updateAvailableTimeSlots = () => {
     const currentIndex = getCurrentSlotIndexLagos()
     setCurrentSlotIndex(currentIndex)
     
-    // For today, only allow current and future slots
-    const available = timeSlots.filter(slot => {
-      const slotIndex = timeIntervalToSlotIndex(slot)
-      return slotIndex >= currentIndex && slotIndex < WORK_SLOT_END
-    })
+    // Check if work slot has ended
+    const ended = hasWorkSlotEndedToday()
+    setWorkSlotEnded(ended)
     
-    setAvailableTimeSlots(available)
+    if (ended) {
+      // Work slot has ended - no more logging allowed
+      setAvailableTimeSlots([])
+    } else {
+      // For today, allow ALL work slots that have passed (including current)
+      // Users can log activities they forgot to log earlier
+      const available = timeSlots.filter(slot => {
+        const slotIndex = timeIntervalToSlotIndex(slot)
+        return slotIndex >= WORK_SLOT_START && slotIndex < WORK_SLOT_END
+      })
+      
+      setAvailableTimeSlots(available)
+    }
   }
 
   const loadDashboardData = async () => {
-    if (!userId) return
-    
-    try {
-      if (isToday) {
-        // Load today's activities
-        await loadTodayActivities()
-      } else {
-        // Load activities for selected date
-        await loadPersonalActivitiesByDateRange(selectedDate, selectedDate)
-      }
-      
-      // Refresh the global activities context
-      refreshActivities()
-      
-    } catch (error) {
-      console.error("Error loading dashboard data:", error)
-      showToast.error("Failed to load activities")
+  if (!userId) return
+  
+  console.log('Loading dashboard data for date:', selectedDate, 'isToday:', isToday);
+  
+  try {
+    if (isToday) {
+      await loadTodayActivities()
+    } else {
+      console.log('Fetching activities for date:', selectedDate);
+      await loadPersonalActivitiesByDateRange(selectedDate, selectedDate)
     }
+    
+    console.log('Personal activities after load:', personalActivities.length);
+    console.log('Sample activity dates:', personalActivities.slice(0, 3).map(a => ({
+      rawDate: a.date,
+      normalized: normalizeDateForComparison(a.date),
+      selectedDate: selectedDate
+    })));
+    
+  } catch (error) {
+    console.error("Error loading dashboard data:", error)
+    showToast.error("Failed to load activities")
   }
+}
 
   const calculateMissedSlots = () => {
     if (!isToday) {
@@ -310,74 +427,156 @@ export default function EmployeeDashboard({ onLogout }: EmployeeDashboardProps) 
   }
 
   const updateActivityTable = () => {
-    if (!userId) return
+  if (!userId) return
+  
+  console.log('DEBUG - All personal activities for filtering:', personalActivities.map(a => ({
+    _id: a._id,
+    rawDate: a.date,
+    normalizedDate: normalizeDateForComparison(a.date),
+    selectedDate: selectedDate
+  })));
+  
+  // Create a simple date comparison function that works with UTC dates
+  const isSameDate = (date1: string | Date, date2: string | Date): boolean => {
+  // Convert both to Date objects
+  const d1 = new Date(date1);
+  const d2 = new Date(date2);
+  
+  // Get the current date in Nigeria timezone
+  const todayNigeria = normalizeDateForComparison(new Date());
+  
+  // Convert activity date to Nigeria timezone for comparison
+  const d1Nigeria = normalizeDateForComparison(d1);
+  const d2Nigeria = normalizeDateForComparison(d2);
+  
+  // If we're comparing with today's date, use Nigeria timezone
+  // If we're comparing with a past date, use simple UTC comparison
+  const shouldUseNigeriaTime = 
+    d1Nigeria === todayNigeria || 
+    d2Nigeria === todayNigeria;
+
+  
+  
+  if (shouldUseNigeriaTime) {
+    return d1Nigeria === d2Nigeria;
+  } else {
+    // For past dates, use UTC comparison (as before)
+    const d1UTC = d1.toISOString().split('T')[0];
+    const d2UTC = d2.toISOString().split('T')[0];
+    return d1UTC === d2UTC;
+  }
+
+  
+};
+  
+  // Fill in activities for selected date - USING SIMPLE UTC COMPARISON
+  const activitiesForDate = personalActivities.filter(activity => {
+    if (!activity.date) {
+      console.log('Activity has no date:', activity._id);
+      return false;
+    }
     
-    // Create empty slots for all work hours
-    const workSlots: ActivityTableEntryHalfHour[] = Array.from({ length: TOTAL_WORK_SLOTS }, (_, index) => {
-      const slotIndex = index + WORK_SLOT_START
-      return {
-        slotIndex: slotIndex,
-        timeLabel: slotIndexToTimeLabel(slotIndex),
-        status: "empty",
-        activities: [],
-      }
-    })
+    // Convert selectedDate to Date object for comparison
+    const selectedDateObj = new Date(selectedDate + 'T00:00:00Z');
+    const activityDateObj = new Date(activity.date);
     
-    // Normalize selected date for comparison
-    const normalizedSelectedDate = normalizeDateForComparison(selectedDate)
+    const isMatch = isSameDate(selectedDateObj, activityDateObj);
     
-    // Fill in activities for selected date
-    const activitiesForDate = personalActivities.filter(activity => {
-      if (!activity.date) return false
-      
-      // Normalize activity date for comparison
-      const activityDate = normalizeDateForComparison(activity.date)
-      return activityDate === normalizedSelectedDate
-    })
+    console.log('Date comparison:', {
+      activityId: activity._id,
+      activityDate: activity.date,
+      activityDateUTC: activityDateObj.toISOString().split('T')[0],
+      selectedDate: selectedDate,
+      selectedDateUTC: selectedDateObj.toISOString().split('T')[0],
+      isMatch: isMatch
+    });
     
-    const tableData = workSlots.map(workSlot => {
-      // Find ALL activities for this slot (not just one)
-      const activitiesInSlot = activitiesForDate.filter(a => {
-        const activitySlot = timeIntervalToSlotIndex(a.timeInterval)
-        return activitySlot === workSlot.slotIndex
-      })
-      
-      if (activitiesInSlot.length > 0) {
-        return {
-          slotIndex: workSlot.slotIndex,
-          timeLabel: workSlot.timeLabel,
-          status: "present" as const,
-          activities: activitiesInSlot.map(activity => ({
+    return isMatch;
+  });
+  
+  console.log('Activities for date:', activitiesForDate.length);
+  console.log('Activity details:', activitiesForDate.map(a => ({
+    timeInterval: a.timeInterval,
+    description: a.description,
+    status: a.status
+  })));
+  
+  // Create empty slots for all work hours
+  const workSlots: ActivityTableEntryHalfHour[] = Array.from({ length: TOTAL_WORK_SLOTS }, (_, index) => {
+    const slotIndex = index + WORK_SLOT_START
+    return {
+      slotIndex: slotIndex,
+      timeLabel: slotIndexToTimeLabel(slotIndex),
+      status: "empty",
+      activities: [],
+    }
+  });
+  
+  // Map activities to their time slots
+  activitiesForDate.forEach(activity => {
+    const slotIndex = timeIntervalToSlotIndex(activity.timeInterval);
+    console.log(`Activity "${activity.timeInterval}" maps to slot index: ${slotIndex}`);
+    
+    // Find the corresponding work slot
+    const workSlotIndex = workSlots.findIndex(slot => slot.slotIndex === slotIndex);
+    
+    if (workSlotIndex !== -1) {
+      // Activity is within work hours
+      const existingEntry = workSlots[workSlotIndex];
+      workSlots[workSlotIndex] = {
+        ...existingEntry,
+        status: "present" as const,
+        activities: [
+          ...existingEntry.activities,
+          {
             id: activity._id,
             description: activity.description,
             status: activity.status,
             timestamp: activity.createdAt,
-            changeCount: 0,
-            category: activity.category,
-            priority: activity.priority
-          }))
-        }
-      }
-      
-      // If no activity, determine status
-      const now = new Date()
-      const todayNormalized = normalizeDateForComparison(now)
-      const currentSlotIndex = getCurrentSlotIndexLagos()
-      
-      // Compare normalized dates
-      if (normalizedSelectedDate < todayNormalized || 
-          (normalizedSelectedDate === todayNormalized && workSlot.slotIndex < currentSlotIndex)) {
-        return {
-          ...workSlot,
-          status: "absent" as const
-        }
-      }
-      
-      return workSlot
-    })
+            changeCount: 0
+          }
+        ]
+      };
+    } else {
+      // Activity is outside work hours
+      console.log(`Activity "${activity.timeInterval}" is outside work hours (slot index: ${slotIndex})`);
+    }
+  });
+  
+  // Determine status for slots without activities
+  const now = new Date();
+  const todayNormalized = normalizeDateForComparison(now);
+  const currentSlotIndex = getCurrentSlotIndexLagos();
+  const normalizedSelectedDate = normalizeDateForComparison(selectedDate + 'T00:00:00Z');
+  
+  const tableData = workSlots.map(workSlot => {
+    // If slot already has activities, return as is
+    if (workSlot.activities.length > 0) {
+      return workSlot;
+    }
     
-    setActivityTable(tableData)
-  }
+    // If no activity, determine status
+    // Compare normalized dates
+    if (normalizedSelectedDate < todayNormalized || 
+        (normalizedSelectedDate === todayNormalized && workSlot.slotIndex < currentSlotIndex)) {
+      return {
+        ...workSlot,
+        status: "absent" as const
+      }
+    }
+    
+    return workSlot;
+  });
+  
+  console.log('Final table data:', tableData.map(slot => ({
+    timeLabel: slot.timeLabel,
+    status: slot.status,
+    activitiesCount: slot.activities.length,
+    slotIndex: slot.slotIndex
+  })));
+  
+  setActivityTable(tableData);
+}
 
   const handleLogActivity = async () => {
     if (!selectedTimeSlot || !activityDescription.trim()) {
@@ -390,23 +589,36 @@ export default function EmployeeDashboard({ onLogout }: EmployeeDashboardProps) 
       return
     }
 
+    // Check if work slot has ended
+    if (workSlotEnded) {
+      showToast.error("Work slot has ended for today. No more entries allowed.")
+      return
+    }
+
     try {
-      // Check if this time slot is still available
+      // Check if this time slot is within work hours
       const slotIndex = timeIntervalToSlotIndex(selectedTimeSlot)
       
-      // Allow any slot up to the end of work day, even if it's past current time
-      // This allows logging activities they forgot to log earlier
+      // Allow any slot within work hours (8:00 AM to 5:30 PM)
       if (slotIndex < WORK_SLOT_START || slotIndex >= WORK_SLOT_END) {
         showToast.error("Please select a time slot between 8:00 AM and 5:30 PM")
+        return
+      }
+
+      // Check if slot is in the past or current (not future)
+      const currentSlotIndex = getCurrentSlotIndexLagos()
+      
+      // Allow logging for today's past slots (employees might have forgotten)
+      // Only restrict if we're trying to log for future slots
+      if (slotIndex > currentSlotIndex) {
+        showToast.error("Cannot log activities for future time slots")
         return
       }
 
       await createPersonalActivity({
         timeInterval: selectedTimeSlot,
         description: activityDescription.trim(),
-        status: activityStatus,
-        category: "work" as any,
-        priority: "medium" as any
+        status: activityStatus
       })
       
       // Reset form
@@ -430,14 +642,10 @@ export default function EmployeeDashboard({ onLogout }: EmployeeDashboardProps) 
       id: activity.id,
       timeInterval: activity.timeInterval,
       description: activity.description,
-      status: activity.status,
-      category: activity.category || "work",
-      priority: activity.priority || "medium"
+      status: activity.status
     })
     setEditDescription(activity.description)
     setEditStatus(activity.status)
-    setEditCategory(activity.category || "work")
-    setEditPriority(activity.priority || "medium")
     setEditModalOpen(true)
   }
 
@@ -448,17 +656,10 @@ export default function EmployeeDashboard({ onLogout }: EmployeeDashboardProps) 
     }
 
     try {
-      // Prepare update data - include all fields
-      const updateData: any = {
+      // Prepare update data
+      const updateData = {
         description: editDescription.trim(),
-        status: editStatus,
-        category: editCategory,
-        priority: editPriority
-      }
-
-      // Only include timeInterval if it's different
-      if (editingActivity.timeInterval !== editingActivity.timeInterval) {
-        updateData.timeInterval = editingActivity.timeInterval
+        status: editStatus
       }
 
       await updatePersonalActivity(editingActivity.id, updateData)
@@ -800,22 +1001,75 @@ export default function EmployeeDashboard({ onLogout }: EmployeeDashboardProps) 
               <CardContent>
                 {isToday ? (
                   <div className="space-y-4">
-                    {/* Current Time Display */}
-                    <div className="text-sm text-slate-600 bg-slate-50 p-3 rounded-md border border-slate-200">
-                      <div className="flex items-center gap-2">
-                        <Clock className="w-4 h-4 text-slate-500" />
-                        <span className="font-medium">Current Lagos Time:</span>
+                    {/* Current Time Display with Countdown Slider */}
+                    <div className="text-sm text-slate-600 bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-sm">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <Clock className="w-4 h-4 text-red-500" />
+                          <span className="font-medium">Lagos Time:</span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-lg font-bold text-slate-800">{currentTime}</span>
+                        </div>
                       </div>
-                      <div className="mt-1 text-center">
-                        <span className="text-lg font-semibold text-slate-800">
-                          {new Date().toLocaleTimeString('en-NG', { 
-                            timeZone: TIMEZONE,
-                            hour: '2-digit', 
-                            minute: '2-digit',
-                            hour12: true 
-                          })}
-                        </span>
+                      
+                      {/* Countdown to Next Slot */}
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-slate-500 font-medium">Time until next slot:</span>
+                          <span className="font-bold text-red-600">
+                            {minutesUntilNextSlot}:{secondsUntilNextMinute.toString().padStart(2, '0')}
+                          </span>
+                        </div>
+                        
+                        {/* Animated Progress Bar */}
+                        <div className="relative h-3 bg-slate-200 rounded-full overflow-hidden">
+                          {/* Background gradient */}
+                          <div className="absolute inset-0 bg-linear-to-r from-red-500 via-red-400 to-red-300"></div>
+                          
+                          {/* Progress fill - decreasing from right to left */}
+                          <div 
+                            className="absolute inset-0 bg-slate-50 transition-all duration-1000 ease-linear"
+                            style={{ 
+                              width: `${100 - countdownProgress}%`,
+                              right: 0 
+                            }}
+                          ></div>
+                          
+                          {/* Sparking red line */}
+                          <div 
+                            className="absolute top-0 bottom-0 w-0.5 bg-red-600 shadow-[0_0_10px_2px_rgba(239,68,68,0.8)] animate-pulse"
+                            style={{ 
+                              right: `${100 - countdownProgress}%`,
+                              transition: 'right 1s linear'
+                            }}
+                          ></div>
+                          
+                          {/* Pulsing dot at the progress edge */}
+                          <div 
+                            className="absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-red-600 shadow-[0_0_15px_5px_rgba(239,68,68,0.6)] animate-ping"
+                            style={{ 
+                              right: `${100 - countdownProgress}%`,
+                              marginRight: '-8px',
+                              transition: 'right 1s linear'
+                            }}
+                          ></div>
+                        </div>
+                        
+                        {/* Slot labels */}
+                        <div className="flex justify-between text-xs text-slate-500 mt-1">
+                          <span>Current slot</span>
+                          <span>Next slot in {minutesUntilNextSlot} min</span>
+                        </div>
                       </div>
+                      
+                      {workSlotEnded && (
+                        <div className="mt-3 p-2.5 bg-red-50 border border-red-200 rounded-lg text-center">
+                          <span className="text-sm font-medium text-red-700">
+                            ⏰ Work slot has ended. No more entries allowed.
+                          </span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Time Slot Dropdown */}
@@ -826,10 +1080,14 @@ export default function EmployeeDashboard({ onLogout }: EmployeeDashboardProps) 
                       <Select 
                         value={selectedTimeSlot} 
                         onValueChange={setSelectedTimeSlot}
-                        disabled={personalActivitiesLoading}
+                        disabled={personalActivitiesLoading || workSlotEnded}
                       >
                         <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Select time slot (8:00 AM - 5:30 PM)" />
+                          <SelectValue placeholder={
+                            workSlotEnded 
+                              ? "Work slot ended - No entries allowed" 
+                              : "Select time slot (8:00 AM - 5:30 PM)"
+                          } />
                         </SelectTrigger>
                         <SelectContent>
                           {availableTimeSlots.length > 0 ? (
@@ -842,13 +1100,18 @@ export default function EmployeeDashboard({ onLogout }: EmployeeDashboardProps) 
                                 <SelectItem 
                                   key={slot} 
                                   value={slot}
-                                  disabled={isPast && !isCurrent}
+                                  disabled={false} // Allow all past slots
                                   className={isCurrent ? "bg-red-50 text-red-700 font-semibold" : ""}
                                 >
                                   <div className="flex items-center justify-between w-full">
                                     <span>{slot}</span>
+                                    {isPast && !isCurrent && (
+                                      <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
+                                        Past
+                                      </span>
+                                    )}
                                     {isCurrent && (
-                                      <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
+                                      <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full animate-pulse">
                                         Current
                                       </span>
                                     )}
@@ -856,15 +1119,21 @@ export default function EmployeeDashboard({ onLogout }: EmployeeDashboardProps) 
                                 </SelectItem>
                               )
                             })
+                          ) : workSlotEnded ? (
+                            <div className="px-2 py-4 text-center text-sm text-slate-500">
+                              ⏰ Work slot has ended. No more entries allowed.
+                            </div>
                           ) : (
                             <div className="px-2 py-4 text-center text-sm text-slate-500">
-                              No more time slots available for today
+                              No time slots available
                             </div>
                           )}
                         </SelectContent>
                       </Select>
                       <p className="mt-1 text-sm text-slate-500">
-                        Available slots: {availableTimeSlots.length} of {timeSlots.length}
+                        {workSlotEnded 
+                          ? "⏰ Work slot has ended for today" 
+                          : `Available slots: ${availableTimeSlots.length} of ${timeSlots.length}`}
                       </p>
                     </div>
 
@@ -874,11 +1143,11 @@ export default function EmployeeDashboard({ onLogout }: EmployeeDashboardProps) 
                         Description *
                       </label>
                       <Textarea
-                        placeholder="What are you working on?"
+                        placeholder={workSlotEnded ? "Work slot has ended" : "What are you working on?"}
                         value={activityDescription}
                         onChange={(e) => setActivityDescription(e.target.value)}
                         className="min-h-[100px] resize-none"
-                        disabled={personalActivitiesLoading}
+                        disabled={personalActivitiesLoading || workSlotEnded}
                       />
                     </div>
 
@@ -892,7 +1161,7 @@ export default function EmployeeDashboard({ onLogout }: EmployeeDashboardProps) 
                         onValueChange={(value: "pending" | "ongoing" | "completed") => 
                           setActivityStatus(value)
                         }
-                        disabled={personalActivitiesLoading}
+                        disabled={personalActivitiesLoading || workSlotEnded}
                       >
                         <SelectTrigger className="w-full">
                           <SelectValue placeholder="Select status" />
@@ -908,13 +1177,18 @@ export default function EmployeeDashboard({ onLogout }: EmployeeDashboardProps) 
                     {/* Log Activity Button */}
                     <Button
                       onClick={handleLogActivity}
-                      disabled={!selectedTimeSlot || !activityDescription.trim() || personalActivitiesLoading}
-                      className="w-full bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded-md transition-all duration-200"
+                      disabled={!selectedTimeSlot || !activityDescription.trim() || personalActivitiesLoading || workSlotEnded}
+                      className="w-full bg-red-600 hover:bg-red-700 text-white py-2.5 px-4 rounded-xl transition-all duration-200 shadow-md hover:shadow-lg"
                     >
                       {personalActivitiesLoading ? (
                         <>
                           <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                           Logging...
+                        </>
+                      ) : workSlotEnded ? (
+                        <>
+                          <Clock className="w-4 h-4 mr-2" />
+                          Work Slot Ended
                         </>
                       ) : (
                         "Log Activity"
@@ -929,15 +1203,18 @@ export default function EmployeeDashboard({ onLogout }: EmployeeDashboardProps) 
                       You can only create activities for today
                     </p>
                     <div className="mt-6 text-sm text-slate-600 bg-slate-50 p-4 rounded-md border border-slate-200">
-                      <p className="font-medium">Current Lagos Time:</p>
-                      <p className="text-lg font-semibold mt-1">
-                        {new Date().toLocaleTimeString('en-NG', { 
-                          timeZone: TIMEZONE,
-                          hour: '2-digit', 
-                          minute: '2-digit',
-                          hour12: true 
-                        })}
-                      </p>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <Clock className="w-4 h-4 text-red-500" />
+                          <span className="font-medium">Current Lagos Time:</span>
+                        </div>
+                        <span className="text-lg font-semibold text-slate-800">
+                          {currentTime}
+                        </span>
+                      </div>
+                      <div className="text-center text-xs text-slate-500 mt-2">
+                        Real-time updates active
+                      </div>
                     </div>
                   </div>
                 )}
@@ -978,13 +1255,24 @@ export default function EmployeeDashboard({ onLogout }: EmployeeDashboardProps) 
                     {/* Activity Timeline - Simplified */}
                     <div className="border border-slate-200 rounded-lg">
                       <div className="bg-slate-50 border-b border-slate-200 px-4 py-3">
-                        <h3 className="text-sm font-semibold text-slate-700">Activity Timeline</h3>
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-sm font-semibold text-slate-700">Activity Timeline</h3>
+                          {isToday && (
+                            <div className="flex items-center gap-2 text-xs">
+                              <div className="flex items-center gap-1">
+                                <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
+                                <span className="text-slate-600">Current slot: {minutesUntilNextSlot}:{secondsUntilNextMinute.toString().padStart(2, '0')}</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </div>
                       
                       <div className="divide-y divide-slate-100">
                         {activityTable.map(entry => {
                           const isCurrentSlot = entry.slotIndex === currentSlotIndex
                           const isPastSlot = entry.slotIndex < currentSlotIndex
+                          const isFutureSlot = entry.slotIndex > currentSlotIndex
                           
                           return (
                             <div key={entry.slotIndex} className={`p-4 ${isCurrentSlot ? 'bg-red-50/30' : ''}`}>
@@ -1008,8 +1296,14 @@ export default function EmployeeDashboard({ onLogout }: EmployeeDashboardProps) 
                                       {entry.status}
                                     </span>
                                     {isCurrentSlot && (
-                                      <span className="px-2 py-1 rounded text-xs bg-red-100 text-red-700 font-medium">
-                                        Current
+                                      <span className="px-2 py-1 rounded text-xs bg-red-100 text-red-700 font-medium animate-pulse flex items-center gap-1">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-red-500"></div>
+                                        Current • {minutesUntilNextSlot}:{secondsUntilNextMinute.toString().padStart(2, '0')}
+                                      </span>
+                                    )}
+                                    {isFutureSlot && isToday && (
+                                      <span className="px-2 py-1 rounded text-xs bg-blue-100 text-blue-700 font-medium">
+                                        Upcoming
                                       </span>
                                     )}
                                   </div>
@@ -1017,84 +1311,70 @@ export default function EmployeeDashboard({ onLogout }: EmployeeDashboardProps) 
                                   {/* Activities List */}
                                   {entry.activities.length > 0 ? (
                                     <div className="space-y-2">
-                                      {entry.activities.map(activity => (
-                                        <div key={activity.id} className="bg-white rounded border border-slate-200 p-3">
-                                          <div className="flex justify-between items-start">
-                                            <div className="flex-1">
-                                              <p className="text-sm font-medium text-slate-800 mb-1">{activity.description}</p>
-                                              <div className="flex items-center gap-2">
-                                                <span className={`text-xs px-2 py-1 rounded ${
-                                                  activity.status === "completed" ? "bg-green-100 text-green-800" :
-                                                  activity.status === "ongoing" ? "bg-blue-100 text-blue-800" :
-                                                  "bg-yellow-100 text-yellow-800"
-                                                }`}>
-                                                  {activity.status}
-                                                </span>
-                                                {activity.priority && (
-                                                  <span className={`text-xs px-2 py-1 rounded ${
-                                                    activity.priority === "high" ? "bg-red-100 text-red-800" :
-                                                    activity.priority === "medium" ? "bg-yellow-100 text-yellow-800" :
-                                                    "bg-green-100 text-green-800"
-                                                  }`}>
-                                                    {activity.priority}
+                                      {entry.activities.map(activity => {
+                                        const statusColor = getStatusColor(activity.status)
+                                        
+                                        return (
+                                          <div key={activity.id} className="bg-white rounded border border-slate-200 p-3">
+                                            <div className="flex justify-between items-start">
+                                              <div className="flex-1">
+                                                <p className="text-sm font-medium text-slate-800 mb-1">{activity.description}</p>
+                                                <div className="flex items-center gap-2">
+                                                  <span className={`text-xs px-2 py-1 rounded ${statusColor}`}>
+                                                    {activity.status}
                                                   </span>
-                                                )}
-                                                {activity.category && (
-                                                  <span className={`text-xs px-2 py-1 rounded bg-gray-100 text-gray-800`}>
-                                                    {activity.category}
-                                                  </span>
-                                                )}
+                                                </div>
                                               </div>
-                                            </div>
-                                            {isToday && (
-                                              <div className="flex gap-1 ml-2">
-                                                {/* Edit Button */}
-                                                <Button
-                                                  size="sm"
-                                                  variant="ghost"
-                                                  onClick={() => handleEditClick(activity)}
-                                                  disabled={personalActivitiesLoading}
-                                                  className="h-7 w-7 p-0 text-blue-600"
-                                                  title="Edit activity"
-                                                >
-                                                  <Edit className="w-3 h-3" />
-                                                </Button>
-                                                
-                                                {/* Status Update Button */}
-                                                {activity.status !== "completed" && (
+                                              {isToday && !workSlotEnded && (
+                                                <div className="flex gap-1 ml-2">
+                                                  {/* Edit Button */}
                                                   <Button
                                                     size="sm"
                                                     variant="ghost"
-                                                    onClick={() => handleActivityUpdate(activity.id, 
-                                                      activity.status === "pending" ? "ongoing" : 
-                                                      activity.status === "ongoing" ? "completed" : "pending"
-                                                    )}
+                                                    onClick={() => handleEditClick(activity)}
                                                     disabled={personalActivitiesLoading}
-                                                    className="h-7 w-7 p-0"
-                                                    title={activity.status === "pending" ? "Start activity" : 
-                                                           activity.status === "ongoing" ? "Complete activity" : "Mark as pending"}
+                                                    className="h-7 w-7 p-0 text-blue-600"
+                                                    title="Edit activity"
                                                   >
-                                                    {activity.status === "pending" ? "▶" : 
-                                                     activity.status === "ongoing" ? "✓" : "↺"}
+                                                    <Edit className="w-3 h-3" />
                                                   </Button>
-                                                )}
-                                                
-                                                {/* Delete Button */}
-                                                <Button
-                                                  size="sm"
-                                                  variant="ghost"
-                                                  className="h-7 w-7 p-0 text-red-600"
-                                                  onClick={() => handleActivityDelete(activity.id)}
-                                                  disabled={personalActivitiesLoading}
-                                                  title="Delete activity"
-                                                >
-                                                  <X className="w-3 h-3" />
-                                                </Button>
-                                              </div>
-                                            )}
+                                                  
+                                                  {/* Status Update Button */}
+                                                  {activity.status !== "completed" && (
+                                                    <Button
+                                                      size="sm"
+                                                      variant="ghost"
+                                                      onClick={() => handleActivityUpdate(activity.id, 
+                                                        activity.status === "pending" ? "ongoing" : 
+                                                        activity.status === "ongoing" ? "completed" : "pending"
+                                                      )}
+                                                      disabled={personalActivitiesLoading}
+                                                      className="h-7 w-7 p-0"
+                                                      title={activity.status === "pending" ? "Start activity" : 
+                                                            activity.status === "ongoing" ? "Complete activity" : "Mark as pending"}
+                                                    >
+                                                      {activity.status === "pending" ? "▶" : 
+                                                      activity.status === "ongoing" ? "✓" : "↺"}
+                                                    </Button>
+                                                  )}
+                                                  
+                                                  {/* Delete Button */}
+                                                  <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    className="h-7 w-7 p-0 text-red-600"
+                                                    onClick={() => handleActivityDelete(activity.id)}
+                                                    disabled={personalActivitiesLoading}
+                                                    title="Delete activity"
+                                                  >
+                                                    <X className="w-3 h-3" />
+                                                  </Button>
+                                                </div>
+                                              )}
+                                            </div>
                                           </div>
-                                        </div>
-                                      ))}
+                                        )
+                                      })}
                                     </div>
                                   ) : (
                                     isPastSlot && isToday && (
@@ -1121,11 +1401,13 @@ export default function EmployeeDashboard({ onLogout }: EmployeeDashboardProps) 
                     </h3>
                     <p className="text-slate-500 text-sm mb-6 max-w-md mx-auto">
                       {isToday 
-                        ? "Start logging activities to see them here."
+                        ? workSlotEnded
+                          ? "Work slot has ended. No more entries allowed."
+                          : "Start logging activities to see them here."
                         : "No activities for this date."}
                     </p>
                     
-                    {isToday && (
+                    {isToday && !workSlotEnded && (
                       <div className="bg-slate-50 rounded-lg border border-slate-200 p-4 text-left max-w-md mx-auto">
                         <h4 className="text-sm font-medium text-slate-700 mb-2">How to start:</h4>
                         <ol className="space-y-1 text-sm text-slate-600">
@@ -1133,6 +1415,12 @@ export default function EmployeeDashboard({ onLogout }: EmployeeDashboardProps) 
                           <li>2. Enter activity description</li>
                           <li>3. Set status and click "Log Activity"</li>
                         </ol>
+                        <div className="mt-3 pt-3 border-t border-slate-200">
+                          <div className="flex items-center gap-2 text-xs text-slate-500">
+                            <Clock className="w-3 h-3" />
+                            <span>Time until next slot: {minutesUntilNextSlot}:{secondsUntilNextMinute.toString().padStart(2, '0')}</span>
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -1144,102 +1432,101 @@ export default function EmployeeDashboard({ onLogout }: EmployeeDashboardProps) 
       </main>
 
       {/* Edit Activity Modal */}
-{/* Edit Activity Modal */}
-<Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
-  <DialogContent className="sm:max-w-[480px] p-0 overflow-hidden border-none shadow-2xl rounded-3xl">
-    {/* Minimalist Header */}
-    <DialogHeader className="p-8 pb-0">
-      <div className="space-y-1">
-        <DialogTitle className="text-2xl font-bold text-slate-900 tracking-tight">
-          Edit Activity
-        </DialogTitle>
-        <p className="text-slate-500 text-sm">Update your progress and task details.</p>
-      </div>
-    </DialogHeader>
-    
-    <div className="p-8 space-y-8">
-      
-      {/* Status Selection - Redesigned as interactive cards/chips */}
-      <div className="space-y-3">
-        <Label className="text-[11px] font-bold uppercase tracking-widest text-slate-400 ml-1">
-          Activity Status
-        </Label>
-        <div className="grid grid-cols-3 gap-2 p-1.5 bg-slate-100/80 rounded-2xl border border-slate-200/50">
-          {(['pending', 'ongoing', 'completed'] as const).map((status) => (
-            <button
-              key={status}
-              onClick={() => setEditStatus(status)}
-              className={`
-                relative py-2.5 rounded-xl text-xs font-bold capitalize transition-all duration-200
-                ${editStatus === status 
-                  ? "bg-white text-[#ec3338] shadow-sm ring-1 ring-black/5" 
-                  : "text-slate-500 hover:text-slate-700 hover:bg-white/50"
-                }
-              `}
-            >
-              {editStatus === status && (
-                <span className="absolute top-1 right-2 flex h-1.5 w-1.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#ec3338] opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[#ec3338]"></span>
-                </span>
-              )}
-              {status}
-            </button>
-          ))}
-        </div>
-      </div>
+      <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
+        <DialogContent className="sm:max-w-[480px] p-0 overflow-hidden border-none shadow-2xl rounded-3xl">
+          {/* Minimalist Header */}
+          <DialogHeader className="p-8 pb-0">
+            <div className="space-y-1">
+              <DialogTitle className="text-2xl font-bold text-slate-900 tracking-tight">
+                Edit Activity
+              </DialogTitle>
+              <p className="text-slate-500 text-sm">Update your progress and task details.</p>
+            </div>
+          </DialogHeader>
+          
+          <div className="p-8 space-y-8">
+            
+            {/* Status Selection - Redesigned as interactive cards/chips */}
+            <div className="space-y-3">
+              <Label className="text-[11px] font-bold uppercase tracking-widest text-slate-400 ml-1">
+                Activity Status
+              </Label>
+              <div className="grid grid-cols-3 gap-2 p-1.5 bg-slate-100/80 rounded-2xl border border-slate-200/50">
+                {(['pending', 'ongoing', 'completed'] as const).map((status) => (
+                  <button
+                    key={status}
+                    onClick={() => setEditStatus(status)}
+                    className={`
+                      relative py-2.5 rounded-xl text-xs font-bold capitalize transition-all duration-200
+                      ${editStatus === status 
+                        ? "bg-white text-[#ec3338] shadow-sm ring-1 ring-black/5" 
+                        : "text-slate-500 hover:text-slate-700 hover:bg-white/50"
+                      }
+                    `}
+                  >
+                    {editStatus === status && (
+                      <span className="absolute top-1 right-2 flex h-1.5 w-1.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#ec3338] opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[#ec3338]"></span>
+                      </span>
+                    )}
+                    {status}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-      {/* Description Field */}
-      <div className="space-y-3">
-        <Label htmlFor="edit-description" className="text-[11px] font-bold uppercase tracking-widest text-slate-400 ml-1">
-          Activity Description
-        </Label>
-        <div className="relative group">
-          <Textarea
-            id="edit-description"
-            value={editDescription}
-            onChange={(e) => setEditDescription(e.target.value)}
-            className="min-h-[120px] p-4 resize-none bg-slate-50 border-transparent focus:bg-white focus:border-[#ec3338]/20 focus:ring-4 focus:ring-[#ec3338]/5 rounded-2xl transition-all duration-300 text-slate-700 leading-relaxed"
-            placeholder="What's happening?"
-          />
-          <div className="absolute bottom-3 right-3">
-             <Edit className="w-4 h-4 text-slate-300 group-focus-within:text-[#ec3338]/40 transition-colors" />
+            {/* Description Field */}
+            <div className="space-y-3">
+              <Label htmlFor="edit-description" className="text-[11px] font-bold uppercase tracking-widest text-slate-400 ml-1">
+                Activity Description
+              </Label>
+              <div className="relative group">
+                <Textarea
+                  id="edit-description"
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  className="min-h-[120px] p-4 resize-none bg-slate-50 border-transparent focus:bg-white focus:border-[#ec3338]/20 focus:ring-4 focus:ring-[#ec3338]/5 rounded-2xl transition-all duration-300 text-slate-700 leading-relaxed"
+                  placeholder="What's happening?"
+                />
+                <div className="absolute bottom-3 right-3">
+                   <Edit className="w-4 h-4 text-slate-300 group-focus-within:text-[#ec3338]/40 transition-colors" />
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
-    </div>
 
-    {/* Floating Footer Action */}
-    <div className="p-8 pt-0">
-      <div className="flex flex-col gap-3">
-        <Button
-          onClick={handleSaveEdit}
-          disabled={!editDescription.trim() || personalActivitiesLoading}
-          className={`
-            w-full h-14 rounded-2xl font-bold text-base transition-all duration-300 shadow-xl
-            ${personalActivitiesLoading 
-              ? "bg-slate-100 text-slate-400" 
-              : "bg-[#ec3338] hover:bg-[#d12d32] text-white hover:shadow-[#ec3338]/30 active:scale-[0.98]"
-            }
-          `}
-        >
-          {personalActivitiesLoading ? (
-            <Loader2 className="w-5 h-5 animate-spin" />
-          ) : (
-            "Save Changes"
-          )}
-        </Button>
-        <Button
-          variant="ghost"
-          onClick={handleCancelEdit}
-          className="w-full h-10 rounded-xl text-slate-400 hover:text-slate-600 font-medium"
-        >
-          Go back
-        </Button>
-      </div>
-    </div>
-  </DialogContent>
-</Dialog>
+          {/* Floating Footer Action */}
+          <div className="p-8 pt-0">
+            <div className="flex flex-col gap-3">
+              <Button
+                onClick={handleSaveEdit}
+                disabled={!editDescription.trim() || personalActivitiesLoading}
+                className={`
+                  w-full h-14 rounded-2xl font-bold text-base transition-all duration-300 shadow-xl
+                  ${personalActivitiesLoading 
+                    ? "bg-slate-100 text-slate-400" 
+                    : "bg-[#ec3338] hover:bg-[#d12d32] text-white hover:shadow-[#ec3338]/30 active:scale-[0.98]"
+                  }
+                `}
+              >
+                {personalActivitiesLoading ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  "Save Changes"
+                )}
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={handleCancelEdit}
+                className="w-full h-10 rounded-xl text-slate-400 hover:text-slate-600 font-medium"
+              >
+                Go back
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

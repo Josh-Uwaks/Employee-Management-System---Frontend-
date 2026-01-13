@@ -1,4 +1,3 @@
-
 "use client"
 
 import {
@@ -57,6 +56,21 @@ interface AdminContextType {
   } | undefined>
   
   updateUser: (userId: string, data: Partial<Employee>) => Promise<Employee | undefined>
+  deleteUser: (userId: string) => Promise<{
+    success: boolean;
+    message: string;
+    data: {
+      id: string;
+      id_card: string;
+      email: string;
+      name: string;
+    };
+    deletedBy: {
+      id_card: string;
+      name: string;
+      role: string;
+    };
+  } | undefined>
   getUserById: (userId: string) => Promise<Employee>
   
   // Department Management
@@ -101,7 +115,8 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
   // User Management
   // ======================
   const loadUsers = useCallback(async () => {
-    if (!isAdmin) {
+    // Allow LINE_MANAGER to view their direct reports and SUPER_ADMIN to view all
+    if (!isAdmin && !isLineManager) {
       setEmployees([])
       setError(null)
       return
@@ -110,7 +125,16 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
     try {
       setIsLoading(true)
       setError(null)
-      const users = await adminApi.getAllUsers()
+      let users = await adminApi.getAllUsers()
+
+      // If LINE_MANAGER, restrict to direct reports (defensive: backend may already do this)
+      if (isLineManager) {
+        users = users.filter((u: any) => {
+          if (!u.reportsTo) return false
+          return (typeof u.reportsTo === 'string') ? u.reportsTo === user?._id : u.reportsTo._id === user?._id
+        })
+      }
+
       console.log(`[ADMIN CONTEXT] ${user?.role} loaded ${users.length} users`)
       setEmployees(users)
     } catch (err: any) {
@@ -128,10 +152,11 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
     } finally {
       setIsLoading(false)
     }
-  }, [isAdmin, isLineManager, user?.role])
+  }, [isAdmin, isLineManager, user?.role, user?._id])
 
   const loadLockedAccounts = useCallback(async () => {
-    if (!isAdmin) {
+    // Allow LINE_MANAGER to view locked accounts for their direct reports as well
+    if (!isAdmin && !isLineManager) {
       setLockedAccounts([])
       return
     }
@@ -143,7 +168,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
       
       if (isLineManager) {
         accounts = accounts.filter((account: any) => {
-          return account.reportsTo && account.reportsTo._id === user?._id
+          return account.reportsTo && (typeof account.reportsTo === 'string' ? account.reportsTo === user?._id : account.reportsTo._id === user?._id)
         })
       }
       setLockedAccounts(accounts)
@@ -164,7 +189,8 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
   // Department Management
   // ======================
   const loadDepartments = useCallback(async () => {
-    if (!isSuperAdmin) {
+    // Allow LINE_MANAGER to view departments (read-only) and SUPER_ADMIN to manage
+    if (!isSuperAdmin && !isLineManager) {
       setDepartments([])
       setDepartmentError(null)
       return
@@ -186,7 +212,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
     } finally {
       setIsDepartmentLoading(false)
     }
-  }, [isSuperAdmin])
+  }, [isSuperAdmin, isLineManager])
 
   // ======================
   // User Account Management Functions
@@ -300,7 +326,38 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [isAdmin])
 
-  const getUserById = useCallback(async (userId: string): Promise<Employee> => {
+  const deleteUser = useCallback(async (userId: string) => {
+    if (!isSuperAdmin) {
+      showToast.error("SUPER_ADMIN access required to delete users")
+      return
+    }
+
+    try {
+      setIsActionLoading(true)
+      const response = await adminApi.deleteUser(userId)
+      setEmployees(prev => prev.filter(emp => emp._id !== userId))
+      showToast.success(response.message || "User deleted successfully")
+      return response
+    } catch (err: any) {
+      console.error("AdminContext deleteUser error:", err)
+      if (err?.message?.includes('Only SUPER_ADMIN')) {
+        showToast.error("Only SUPER_ADMIN can delete users")
+      } else if (err?.message?.includes('Cannot delete your own account')) {
+        showToast.error("You cannot delete your own account")
+      } else if (err?.message?.includes('Cannot delete another SUPER_ADMIN')) {
+        showToast.error("Cannot delete another SUPER_ADMIN account")
+      } else if (err?.message?.includes('User not found')) {
+        showToast.error("User not found")
+      } else {
+        showToast.error(err.message || "Failed to delete user")
+      }
+      throw err
+    } finally {
+      setIsActionLoading(false)
+    }
+  }, [isSuperAdmin])
+
+  const getUserById = useCallback(async (userId: string): Promise<Employee> => { 
     if (!isAdmin) throw new Error("Admin access required")
 
     try {
@@ -475,6 +532,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
       lockUserAccount,
       unlockUserAccount,
       updateUser,
+      deleteUser,
       getUserById,
       
       // Department Management
