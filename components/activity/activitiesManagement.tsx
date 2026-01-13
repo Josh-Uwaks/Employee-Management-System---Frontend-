@@ -27,13 +27,14 @@ import {
   FilterX,
   History,
   Info,
-  Filter
+  Filter,
+  Users
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Progress } from "@/components/ui/progress"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
+// ADD directReportsCount to the interface
 interface ActivitiesManagementProps {
   activities: DailyActivity[]
   stats: any
@@ -43,6 +44,7 @@ interface ActivitiesManagementProps {
   isAdmin: boolean
   isSuperAdmin: boolean
   isLineManager: boolean
+  directReportsCount: number  // ADD THIS
   onFilterChange: (filters: any) => void
   onRefresh: () => void
   onExport: () => void
@@ -68,6 +70,7 @@ export default function ActivitiesManagement({
   isAdmin,
   isSuperAdmin,
   isLineManager,
+  directReportsCount,  // ADD THIS PARAMETER
   onFilterChange,
   onRefresh,
   onExport,
@@ -146,10 +149,55 @@ export default function ActivitiesManagement({
     return Math.round((completed / stats.total) * 100)
   }
 
+  // Add a helper function to show role-specific messages
+  const getEmptyStateMessage = () => {
+    if (isLineManager && activities.length === 0) {
+      if (directReportsCount === 0) {
+        return {
+          title: "No Direct Reports",
+          message: "You don't have any direct reports assigned to you yet.",
+          action: "Contact SUPER_ADMIN to assign staff to you"
+        }
+      } else {
+        return {
+          title: "No Activities Found",
+          message: "Your direct reports haven't logged any activities yet.",
+          action: "Encourage your staff to log their daily activities"
+        }
+      }
+    }
+    
+    return {
+      title: "No activities found",
+      message: searchQuery || Object.values(localFilters).some(f => f !== "" && f !== "all") 
+        ? "Try adjusting your search criteria"
+        : "No activities have been logged yet",
+      action: ""
+    }
+  }
+
   return (
     <TooltipProvider>
       <div className="space-y-6">
-        {/* Search and Filter Bar - Updated to match EmployeeManagement */}
+        {/* Role-specific header for LINE_MANAGER */}
+        {isLineManager && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex items-center gap-3">
+              <Users className="text-blue-600" size={20} />
+              <div className="flex-1">
+                <h3 className="font-semibold text-blue-800">Line Manager View</h3>
+                <p className="text-sm text-blue-600">
+                  You are viewing activities of your {directReportsCount} direct report{directReportsCount !== 1 ? 's' : ''}
+                </p>
+              </div>
+              <Badge variant="outline" className="bg-blue-100 text-blue-700 border-blue-300">
+                Restricted Access
+              </Badge>
+            </div>
+          </div>
+        )}
+
+        {/* Search and Filter Bar */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 border border-slate-200 rounded-xl bg-slate-50/50">
           <div className="flex flex-wrap items-center gap-3">
             <div className="relative w-48 sm:w-56">
@@ -207,8 +255,8 @@ export default function ActivitiesManagement({
           </div>
         </div>
 
-        {/* Stats Summary - Updated to match EmployeeManagement */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {/* Stats Summary - Updated with role-specific info */}
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
           <div className="bg-[#ec3338]/5 border border-[#ec3338]/20 rounded-lg p-4">
             <div className="flex items-center justify-between">
               <div className="space-y-1">
@@ -244,9 +292,24 @@ export default function ActivitiesManagement({
               </div>
             </div>
           </div>
+
+          {/* Direct Reports Count - Only show for LINE_MANAGER */}
+          {isLineManager && (
+            <div className="bg-indigo-50/50 border border-indigo-100 rounded-lg p-4">
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <p className="text-xs font-medium text-indigo-700">Direct Reports</p>
+                  <p className="text-xl font-bold text-indigo-900">{directReportsCount}</p>
+                </div>
+                <div className="p-2 bg-indigo-100 rounded-lg">
+                  <Users className="text-indigo-600" size={18} />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Additional Filters Card - Using same border styles */}
+        {/* Additional Filters Card */}
         <Card className="border border-slate-200">
           <CardHeader className="pb-4">
             <div className="flex items-center justify-between">
@@ -319,12 +382,13 @@ export default function ActivitiesManagement({
           </CardContent>
         </Card>
 
-        {/* Results Header - Updated to match */}
+        {/* Results Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-lg border border-slate-200">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">Activity Log</h2>
             <p className="text-sm text-slate-500">
               Showing {activities.length} of {pagination?.totalItems || 0} activities
+              {isLineManager && ` (from ${directReportsCount} direct report${directReportsCount !== 1 ? 's' : ''})`}
             </p>
           </div>
           
@@ -355,7 +419,7 @@ export default function ActivitiesManagement({
           )}
         </div>
 
-        {/* ACTIVITY LIST - KEPT EXACTLY AS YOU HAD IT - NO CHANGES */}
+        {/* ACTIVITY LIST */}
         <div className="space-y-4">
           {isLoading ? (
             <div className="h-64 flex flex-col items-center justify-center bg-white rounded-lg border">
@@ -365,12 +429,13 @@ export default function ActivitiesManagement({
           ) : activities.length === 0 ? (
             <div className="h-64 flex flex-col items-center justify-center bg-white rounded-lg border">
               <Activity className="h-12 w-12 text-slate-300 mb-4" />
-              <p className="font-medium text-slate-900 mb-2">No activities found</p>
-              <p className="text-sm text-slate-500 text-center max-w-md">
-                {searchQuery || Object.values(localFilters).some(f => f !== "" && f !== "all") 
-                  ? "Try adjusting your search criteria"
-                  : "No activities have been logged yet"}
+              <p className="font-medium text-slate-900 mb-2">{getEmptyStateMessage().title}</p>
+              <p className="text-sm text-slate-500 text-center max-w-md mb-4">
+                {getEmptyStateMessage().message}
               </p>
+              {getEmptyStateMessage().action && (
+                <p className="text-sm text-blue-600 italic">{getEmptyStateMessage().action}</p>
+              )}
             </div>
           ) : (
             activities.map((activity) => {

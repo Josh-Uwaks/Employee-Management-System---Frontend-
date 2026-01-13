@@ -3,32 +3,31 @@
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Progress } from "@/components/ui/progress"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Card, CardContent } from "@/components/ui/card"
 import { Department, Employee } from "@/lib/admin"
-import { 
-  Building2, 
-  Users, 
-  UserCog, 
-  Mail, 
-  Calendar, 
-  Hash, 
-  FileText, 
+import {
+  Building2,
+  Calendar,
+  Clock,
+  Users,
+  UserCog,
+  ShieldCheck,
+  Eye,
+  Lock,
+  Mail,
+  Phone,
   MapPin,
+  Briefcase,
   CheckCircle,
   XCircle,
-  Shield,
-  Eye,
-  ExternalLink,
-  ChevronRight,
-  User,
-  Building,
-  AlertCircle
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -38,6 +37,8 @@ interface ViewDepartmentDialogProps {
   department: Department | null
   employees: Employee[]
   totalStaffCount?: number
+  isLineManager?: boolean
+  authUserId?: string
 }
 
 export default function ViewDepartmentDialog({
@@ -45,699 +46,406 @@ export default function ViewDepartmentDialog({
   onOpenChange,
   department,
   employees,
-  totalStaffCount
+  totalStaffCount = 0,
+  isLineManager = false,
+  authUserId,
 }: ViewDepartmentDialogProps) {
   if (!department) return null
 
-  // Get staff in this department
-  const departmentStaff = employees.filter(emp => {
-    if (!emp.department) return false
-    if (typeof emp.department === 'string') {
-      return emp.department === department._id
-    } else {
-      return emp.department._id === department._id
-    }
-  })
+  /* ------------------------ DATA LOGIC ------------------------ */
+  // Filter employees based on LINE_MANAGER access
+  const filteredEmployees = isLineManager && authUserId
+    ? employees.filter(emp => 
+        emp.reportsTo && 
+        (typeof emp.reportsTo === 'string' 
+          ? emp.reportsTo === authUserId 
+          : emp.reportsTo._id === authUserId))
+    : employees
 
-  // Get line managers in this department
-  const lineManagers = departmentStaff.filter(emp => emp.role === "LINE_MANAGER")
-  
-  // Get regular staff (not managers)
-  const regularStaff = departmentStaff.filter(emp => emp.role === "STAFF")
-  
-  // Get staff by manager
-  const staffByManager = new Map<string, Employee[]>()
-  
-  lineManagers.forEach(manager => {
-    const staff = regularStaff.filter(emp => 
-      emp.reportsTo && 
-      (typeof emp.reportsTo === 'string' ? emp.reportsTo === manager._id : emp.reportsTo._id === manager._id)
-    )
-    staffByManager.set(manager._id, staff)
-  })
+  const departmentStaff = filteredEmployees.filter(emp =>
+    typeof emp.department === "string"
+      ? emp.department === department._id
+      : emp.department?._id === department._id
+  )
 
-  // Staff without manager
-  const staffWithoutManager = regularStaff.filter(emp => !emp.reportsTo)
+  const managers = departmentStaff.filter(e => e.role === "LINE_MANAGER")
+  const staff = departmentStaff.filter(e => e.role === "STAFF")
+  const activeStaff = departmentStaff.filter(e => e.is_active && !e.isLocked).length
+  const lockedStaff = departmentStaff.filter(e => e.isLocked).length
+  const verifiedStaff = departmentStaff.filter(e => e.isVerified).length
 
-  // Active staff count
-  const activeStaff = departmentStaff.filter(emp => emp.is_active && !emp.isLocked).length
-  const lockedStaff = departmentStaff.filter(emp => emp.isLocked).length
+  const activeRate = Math.round(
+    (activeStaff / Math.max(departmentStaff.length, 1)) * 100
+  )
+  const verificationRate = Math.round(
+    (verifiedStaff / Math.max(departmentStaff.length, 1)) * 100
+  )
 
-  const getFullName = (emp: Employee) => `${emp.first_name} ${emp.last_name}`
-  
-  const getManagerName = (managerId: string) => {
-    const manager = lineManagers.find(m => m._id === managerId)
-    return manager ? getFullName(manager) : "Unknown Manager"
-  }
+  const getName = (e: Employee) => `${e.first_name} ${e.last_name}`
+  const getInitials = (e: Employee) =>
+    `${e.first_name?.[0] || ""}${e.last_name?.[0] || ""}`.toUpperCase()
 
-  const formatDate = (dateString?: string) => {
-    if (!dateString) return "N/A"
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    })
-  }
+  const formatDate = (d?: string) =>
+    d
+      ? new Date(d).toLocaleDateString("en-US", {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        })
+      : "N/A"
 
+  /* ------------------------ UI ------------------------ */
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-4xl max-h-[95vh] overflow-hidden p-0 border-[#ec3338]/20">
-        <DialogHeader className="bg-gradient-to-r from-[#ec3338] to-[#ec3338]/90 text-white p-6">
-          <div className="flex items-center justify-between">
-            <div className="space-y-1">
-              <DialogTitle className="text-xl font-bold flex items-center gap-2">
-                <Building2 className="h-5 w-5" />
+      <DialogContent className="sm:max-w-5xl max-h-[95vh] p-0 overflow-hidden bg-slate-50">
+
+        {/* ---------- HEADER ---------- */}
+        <div className="bg-[#ec3338] px-8 py-6 text-white">
+          <div className="flex items-center gap-4">
+            <div className="h-12 w-12 rounded-xl bg-white/10 flex items-center justify-center">
+              <Building2 />
+            </div>
+            <div>
+              <DialogTitle className="text-2xl font-bold">
                 {department.name}
               </DialogTitle>
               <DialogDescription className="text-white/80">
-                Department details and staff overview
+                Code: <span className="font-mono">{department.code || "N/A"}</span>
+                {isLineManager && (
+                  <span className="ml-4 px-2 py-1 bg-white/20 rounded text-xs">
+                    View Only
+                  </span>
+                )}
               </DialogDescription>
             </div>
-            <Badge className={cn(
-              "text-xs font-semibold",
-              department.isActive 
-                ? "bg-white/20 text-white border-white/30" 
-                : "bg-slate-500/20 text-white border-slate-500/30"
-            )}>
-              {department.isActive ? "Active" : "Inactive"}
+            <Badge
+              className={cn(
+                "ml-auto",
+                department.isActive
+                  ? "bg-emerald-500/20 text-emerald-200"
+                  : "bg-slate-500/20 text-slate-200"
+              )}
+            >
+              {department.isActive ? "Operational" : "Inactive"}
             </Badge>
           </div>
-        </DialogHeader>
+        </div>
 
-        <ScrollArea className="h-[calc(95vh-180px)] px-6">
-          <div className="space-y-6 py-6">
-            {/* Department Header Info */}
-            <div className="rounded-xl border border-[#ec3338]/10 bg-gradient-to-br from-white to-[#ec3338]/5 p-5">
-              <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
-                <div className="space-y-3">
-                  <div className="flex items-center gap-3">
-                    <div className="p-3 bg-[#ec3338]/10 rounded-xl">
-                      <Building className="h-6 w-6 text-[#ec3338]" />
-                    </div>
-                    <div>
-                      <h3 className="text-lg font-bold text-slate-900">{department.name}</h3>
-                      <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600 mt-1">
-                        {department.code && (
-                          <div className="flex items-center gap-1.5 bg-white px-3 py-1 rounded-lg border border-[#ec3338]/10">
-                            <Hash className="h-3.5 w-3.5 text-[#ec3338]" />
-                            <code className="font-mono font-semibold text-[#ec3338]">
-                              {department.code}
-                            </code>
-                          </div>
-                        )}
-                        
-                        <div className="flex items-center gap-1.5">
-                          <Users className="h-3.5 w-3.5 text-[#ec3338]" />
-                          <span className="font-semibold text-slate-700">{departmentStaff.length} staff</span>
-                        </div>
-                        
-                        {department.createdAt && (
-                          <div className="flex items-center gap-1.5">
-                            <Calendar className="h-3.5 w-3.5 text-slate-500" />
-                            <span>Created: {formatDate(department.createdAt)}</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  
-                  {department.description && (
-                    <div className="pt-4 border-t border-slate-200">
-                      <div className="flex items-start gap-3">
-                        <FileText className="text-[#ec3338] mt-0.5 shrink-0" size={18} />
-                        <div>
-                          <p className="text-sm font-medium text-slate-700 mb-1">Description</p>
-                          <p className="text-sm text-slate-600">{department.description}</p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
+        {/* ---------- STATS STRIP ---------- */}
+        <div className="px-8 py-4 grid grid-cols-1 md:grid-cols-3 gap-4 bg-white border-b">
+          <Stat label="Total Staff" value={departmentStaff.length} icon={<Users size={16} />} />
+          <Stat label="Active Staff" value={activeStaff} icon={<CheckCircle size={16} />} />
+          <Stat label="Verification Rate" value={`${verificationRate}%`} icon={<ShieldCheck size={16} />} />
+        </div>
 
-                  {/* If this view is restricted (line manager), show note */}
-                  {typeof totalStaffCount !== 'undefined' && totalStaffCount > employees.length && (
-                    <div className="mt-4 p-3 rounded-lg bg-amber-50 border border-amber-100">
-                      <p className="text-sm text-amber-700">Showing <strong>{employees.length}</strong> of <strong>{totalStaffCount}</strong> staff (restricted to your direct reports)</p>
-                    </div>
-                  )}
-                </div>
-                
-                <div className="flex flex-col gap-2">
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                    className="gap-2 border-[#ec3338]/20 text-[#ec3338] hover:bg-[#ec3338]/10 hover:border-[#ec3338]/30 transition-all"
-                  >
-                    <ExternalLink size={14} />
-                    Full View
-                  </Button>
-                </div>
-              </div>
-            </div>
+        <ScrollArea className="h-[70vh] px-8 py-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
 
-            {/* Department Statistics */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className="bg-gradient-to-br from-[#ec3338]/5 to-white border border-[#ec3338]/20 rounded-xl p-5">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-1">
-                    <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Total Staff</p>
-                    <p className="text-3xl font-bold text-[#ec3338]">{departmentStaff.length}</p>
-                    <p className="text-xs text-slate-500">
-                      {activeStaff} active • {lockedStaff} locked
-                    </p>
-                  </div>
-                  <div className="p-3 bg-[#ec3338]/10 rounded-xl">
-                    <Users className="text-[#ec3338]" size={22} />
-                  </div>
-                </div>
-              </div>
-              
-              <div className="bg-gradient-to-br from-blue-50 to-white border border-blue-100 rounded-xl p-5">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-1">
-                    <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Line Managers</p>
-                    <p className="text-3xl font-bold text-blue-700">{lineManagers.length}</p>
-                    <p className="text-xs text-slate-500">
-                      Manages {regularStaff.length} staff
-                    </p>
-                  </div>
-                  <div className="p-3 bg-blue-100 rounded-xl">
-                    <UserCog className="text-blue-600" size={22} />
-                  </div>
-                </div>
-              </div>
-              
-              <div className="bg-gradient-to-br from-emerald-50 to-white border border-emerald-100 rounded-xl p-5">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-1">
-                    <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Active Staff</p>
-                    <p className="text-3xl font-bold text-emerald-700">{activeStaff}</p>
-                    <p className="text-xs text-slate-500">
-                      {departmentStaff.length > 0 
-                        ? `${Math.round((activeStaff / departmentStaff.length) * 100)}% active`
-                        : "No staff"
-                      }
-                    </p>
-                  </div>
-                  <div className="p-3 bg-emerald-100 rounded-xl">
-                    <CheckCircle className="text-emerald-600" size={22} />
-                  </div>
-                </div>
-              </div>
-              
-              <div className="bg-gradient-to-br from-amber-50 to-white border border-amber-100 rounded-xl p-5">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-1">
-                    <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Unassigned</p>
-                    <p className="text-3xl font-bold text-amber-700">{staffWithoutManager.length}</p>
-                    <p className="text-xs text-slate-500">
-                      Needs manager assignment
-                    </p>
-                  </div>
-                  <div className="p-3 bg-amber-100 rounded-xl">
-                    <AlertCircle className="text-amber-600" size={22} />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Quick Stats Bar */}
-            <div className="bg-slate-50/50 border border-slate-100 rounded-xl p-4">
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <div className="flex items-center gap-6">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-[#ec3338]"></div>
-                    <span className="text-sm text-slate-700">Total Staff</span>
-                    <span className="font-bold text-[#ec3338]">{departmentStaff.length}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
-                    <span className="text-sm text-slate-700">Active</span>
-                    <span className="font-bold text-emerald-700">{activeStaff}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-rose-500"></div>
-                    <span className="text-sm text-slate-700">Locked</span>
-                    <span className="font-bold text-rose-700">{lockedStaff}</span>
-                  </div>
-                </div>
-                <div className="text-sm text-slate-500">
-                  Updated just now
-                </div>
-              </div>
-            </div>
-
-            {/* Line Managers Section */}
-            {lineManagers.length > 0 && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-                  <div>
-                    <h4 className="font-bold text-slate-900 flex items-center gap-2">
-                      <UserCog className="h-5 w-5 text-blue-600" />
-                      Line Managers
-                      <Badge className="ml-2 bg-blue-50 text-blue-700 border-blue-200">
-                        {lineManagers.length}
-                      </Badge>
-                    </h4>
-                    <p className="text-sm text-slate-600 mt-1">
-                      Managers responsible for department supervision
-                    </p>
-                  </div>
-                  <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
-                    {regularStaff.length} staff managed
-                  </Badge>
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {lineManagers.map(manager => {
-                    const reports = staffByManager.get(manager._id) || []
-                    
-                    return (
-                      <div key={manager._id} className="border border-blue-100 rounded-xl p-5 bg-gradient-to-br from-blue-50/30 to-white hover:shadow-sm transition-shadow">
-                        <div className="flex items-start justify-between mb-4">
-                          <div className="space-y-2">
-                            <div className="flex items-center gap-2">
-                              <div className="p-2 bg-blue-100 rounded-lg">
-                                <UserCog className="text-blue-600" size={16} />
-                              </div>
-                              <div>
-                                <h5 className="font-semibold text-slate-900">{getFullName(manager)}</h5>
-                                <div className="flex items-center gap-2 text-sm text-slate-600">
-                                  <Badge className="text-xs bg-blue-100 text-blue-700 border-blue-200">
-                                    LINE_MANAGER
-                                  </Badge>
-                                  <span className="text-xs">•</span>
-                                  <span>{manager.position || "Manager"}</span>
-                                </div>
-                              </div>
-                            </div>
-                            
-                            <div className="space-y-1.5 text-sm">
-                              <div className="flex items-center gap-2">
-                                <Mail className="h-3.5 w-3.5 text-slate-400" />
-                                <span className="text-slate-600">{manager.email}</span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <code className="bg-white px-2 py-0.5 rounded border border-blue-100 text-xs font-mono">
-                                  {manager.id_card}
-                                </code>
-                              </div>
-                            </div>
-                          </div>
-                          
-                          <div className="text-center">
-                            <div className="text-2xl font-bold text-blue-700">{reports.length}</div>
-                            <div className="text-xs text-slate-500">Direct reports</div>
-                          </div>
-                        </div>
-                        
-                        {reports.length > 0 && (
-                          <div className="mt-4 pt-4 border-t border-blue-100">
-                            <div className="text-xs font-semibold text-slate-700 mb-3 flex items-center justify-between">
-                              <span>Direct Reports</span>
-                              <ChevronRight className="h-3 w-3" />
-                            </div>
-                            <div className="space-y-2">
-                              {reports.map(staff => (
-                                <div key={staff._id} className="flex items-center justify-between p-2.5 bg-white rounded-lg border border-blue-50 hover:border-blue-100 transition-colors">
-                                  <div className="flex items-center gap-2.5">
-                                    <div className="p-1.5 bg-slate-50 rounded-lg">
-                                      <User className="h-3 w-3 text-slate-500" />
-                                    </div>
-                                    <div>
-                                      <div className="font-medium text-sm text-slate-900">
-                                        {staff.first_name} {staff.last_name}
-                                      </div>
-                                      <div className="text-xs text-slate-500">{staff.position || "Staff"}</div>
-                                    </div>
-                                  </div>
-                                  <Badge className={cn(
-                                    "text-xs",
-                                    staff.isLocked 
-                                      ? "bg-rose-100 text-rose-700 border-rose-200" 
-                                      : staff.is_active 
-                                        ? "bg-emerald-100 text-emerald-700 border-emerald-200" 
-                                        : "bg-slate-100 text-slate-600 border-slate-200"
-                                  )}>
-                                    {staff.isLocked ? "Locked" : staff.is_active ? "Active" : "Inactive"}
-                                  </Badge>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Staff Without Manager */}
-            {staffWithoutManager.length > 0 && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-                  <div>
-                    <h4 className="font-bold text-slate-900 flex items-center gap-2">
-                      <AlertCircle className="h-5 w-5 text-amber-600" />
-                      Staff Without Manager
-                      <Badge className="ml-2 bg-amber-50 text-amber-700 border-amber-200">
-                        {staffWithoutManager.length}
-                      </Badge>
-                    </h4>
-                    <p className="text-sm text-slate-600 mt-1">
-                      Staff members requiring manager assignment
-                    </p>
-                  </div>
-                  <Badge variant="outline" className="text-xs bg-amber-50 text-amber-700 border-amber-200">
-                    Needs attention
-                  </Badge>
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {staffWithoutManager.map(staff => (
-                    <div key={staff._id} className="border border-amber-100 rounded-xl p-4 bg-gradient-to-br from-amber-50/30 to-white">
-                      <div className="flex items-start justify-between">
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <div className="p-2 bg-amber-100 rounded-lg">
-                              <User className="h-3.5 w-3.5 text-amber-600" />
-                            </div>
-                            <div>
-                              <h5 className="font-semibold text-slate-900">{getFullName(staff)}</h5>
-                              <div className="text-xs text-slate-500">{staff.position || "Staff"}</div>
-                            </div>
-                          </div>
-                          
-                          <div className="space-y-1 text-sm">
-                            <div className="flex items-center gap-1.5">
-                              <Mail className="h-3 w-3 text-slate-400" />
-                              <span className="text-slate-600 truncate">{staff.email}</span>
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                              <code className="bg-white px-2 py-0.5 rounded border border-amber-100 text-xs font-mono">
-                                {staff.id_card}
-                              </code>
-                            </div>
-                          </div>
-                        </div>
-                        
-                        <div className="flex flex-col items-end gap-1.5">
-                          <Badge className={cn(
-                            "text-xs",
-                            staff.isLocked 
-                              ? "bg-rose-100 text-rose-700 border-rose-200" 
-                              : staff.is_active 
-                                ? "bg-emerald-100 text-emerald-700 border-emerald-200" 
-                                : "bg-slate-100 text-slate-600 border-slate-200"
-                          )}>
-                            {staff.isLocked ? "Locked" : staff.is_active ? "Active" : "Inactive"}
-                          </Badge>
-                          
-                          {!staff.isVerified && (
-                            <Badge className="text-xs bg-amber-100 text-amber-700 border-amber-200">
-                              Unverified
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* All Staff in Department */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-                <div>
-                  <h4 className="font-bold text-slate-900 flex items-center gap-2">
-                    <Users className="h-5 w-5 text-[#ec3338]" />
-                    All Department Staff
-                    <Badge className="ml-2 bg-[#ec3338]/10 text-[#ec3338] border-[#ec3338]/20">
-                      {departmentStaff.length}
-                    </Badge>
-                  </h4>
-                  <p className="text-sm text-slate-600 mt-1">
-                    Complete list of staff members in this department
+            {/* ---------- LEFT SIDEBAR ---------- */}
+            <div className="space-y-6">
+              <Card>
+                <CardContent className="p-6 space-y-4">
+                  <SectionTitle>Department Overview</SectionTitle>
+                  <p className="text-sm text-slate-700 leading-relaxed">
+                    {department.description || "No description provided."}
                   </p>
-                </div>
-                <div className="flex items-center gap-4 text-xs">
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-500"></div>
-                    <span className="text-slate-600">Active</span>
+
+                  <div className="pt-4 space-y-3 border-t">
+                    <MetaRow
+                      icon={<Calendar size={14} />}
+                      label="Created"
+                      value={formatDate(department.createdAt)}
+                    />
+                    <MetaRow
+                      icon={<Clock size={14} />}
+                      label="Last Updated"
+                      value={formatDate(department.updatedAt)}
+                    />
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-2.5 h-2.5 rounded-full bg-rose-500"></div>
-                    <span className="text-slate-600">Locked</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-2.5 h-2.5 rounded-full bg-slate-400"></div>
-                    <span className="text-slate-600">Inactive</span>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="border border-slate-200 rounded-xl overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-gradient-to-r from-slate-50 to-slate-50/50">
-                      <tr>
-                        <th className="text-left p-4 text-sm font-semibold text-slate-700 border-b border-slate-200">
-                          <div className="flex items-center gap-2">
-                            <User className="h-3.5 w-3.5" />
-                            Name
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent className="p-6 space-y-4">
+                  <SectionTitle>Staff Status Breakdown</SectionTitle>
+
+                  <ProgressRow
+                    label="Active"
+                    value={activeStaff}
+                    total={departmentStaff.length}
+                    color="bg-emerald-500"
+                    icon={<CheckCircle size={12} />}
+                  />
+                  <ProgressRow
+                    label="Verified"
+                    value={verifiedStaff}
+                    total={departmentStaff.length}
+                    color="bg-blue-500"
+                    icon={<ShieldCheck size={12} />}
+                  />
+                  <ProgressRow
+                    label="Locked"
+                    value={lockedStaff}
+                    total={departmentStaff.length}
+                    color="bg-[#ec3338]"
+                    icon={<Lock size={12} />}
+                  />
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* ---------- MAIN CONTENT ---------- */}
+            <div className="lg:col-span-2 space-y-8">
+
+              {/* ----- LEADERSHIP ----- */}
+              {managers.length > 0 && (
+                <section>
+                  <HeaderRow
+                    title="Leadership"
+                    icon={<UserCog size={18} />}
+                    count={managers.length}
+                  />
+
+                  <div className="grid md:grid-cols-2 gap-4">
+                    {managers.map(m => {
+                      const reports = departmentStaff.filter(
+                        e =>
+                          typeof e.reportsTo === "string"
+                            ? e.reportsTo === m._id
+                            : e.reportsTo?._id === m._id
+                      )
+
+                      return (
+                        <div
+                          key={m._id}
+                          className="bg-white border-l-4 border-[#ec3338] rounded-xl p-4 shadow-sm"
+                        >
+                          <div className="flex items-center gap-4">
+                            <Avatar className="h-12 w-12">
+                              <AvatarFallback className="bg-[#ec3338]/10 text-[#ec3338]">
+                                {getInitials(m)}
+                              </AvatarFallback>
+                            </Avatar>
+
+                            <div className="flex-1">
+                              <p className="font-semibold text-slate-900">{getName(m)}</p>
+                              <p className="text-sm text-slate-500">{m.position || "Manager"}</p>
+                              <div className="flex items-center gap-2 mt-1">
+                                <Mail className="w-3 h-3 text-slate-400" />
+                                <span className="text-xs text-slate-600">{m.email}</span>
+                              </div>
+                            </div>
+
+                            <Badge variant="secondary" className="gap-1">
+                              <Users size={12} />
+                              {reports.length} reports
+                            </Badge>
                           </div>
-                        </th>
-                        <th className="text-left p-4 text-sm font-semibold text-slate-700 border-b border-slate-200">Role</th>
-                        <th className="text-left p-4 text-sm font-semibold text-slate-700 border-b border-slate-200">ID Card</th>
-                        <th className="text-left p-4 text-sm font-semibold text-slate-700 border-b border-slate-200">Position</th>
-                        <th className="text-left p-4 text-sm font-semibold text-slate-700 border-b border-slate-200">Status</th>
-                        <th className="text-left p-4 text-sm font-semibold text-slate-700 border-b border-slate-200">Manager</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {departmentStaff.map(staff => {
-                        const manager = lineManagers.find(m => 
-                          staff.reportsTo && 
-                          (typeof staff.reportsTo === 'string' 
-                            ? staff.reportsTo === m._id 
-                            : staff.reportsTo._id === m._id)
-                        )
-                        
-                        return (
-                          <tr key={staff._id} className="hover:bg-slate-50/50 transition-colors">
-                            <td className="p-4">
+                        </div>
+                      )
+                    })}
+                  </div>
+                </section>
+              )}
+
+              {/* ----- STAFF TABLE ----- */}
+              <section className="bg-white rounded-xl border overflow-hidden">
+                <div className="px-6 py-4 border-b bg-slate-50 flex items-center justify-between">
+                  <h3 className="text-sm font-bold uppercase tracking-wide">
+                    Staff Roster {isLineManager && "(Your Direct Reports)"}
+                  </h3>
+                  <Badge variant="outline" className="text-xs">
+                    {departmentStaff.length} staff members
+                  </Badge>
+                </div>
+
+                {departmentStaff.length === 0 ? (
+                  <div className="p-8 text-center text-slate-500">
+                    <Users className="w-12 h-12 mx-auto mb-4 text-slate-300" />
+                    <p className="font-medium">No staff members in this department</p>
+                    <p className="text-sm mt-1">
+                      {isLineManager 
+                        ? "You don't have any direct reports in this department"
+                        : "No employees are assigned to this department yet"}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                        <tr>
+                          <th className="px-6 py-3 text-left">Employee</th>
+                          <th className="px-6 py-3">Role</th>
+                          <th className="px-6 py-3">Status</th>
+                          <th className="px-6 py-3 text-right">ID</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {departmentStaff.map(s => (
+                          <tr key={s._id} className="hover:bg-slate-50">
+                            <td className="px-6 py-4">
                               <div className="flex items-center gap-3">
-                                <div className={cn(
-                                  "w-2 h-2 rounded-full flex-shrink-0",
-                                  staff.isLocked ? "bg-rose-500" : 
-                                  staff.is_active ? "bg-emerald-500" : "bg-slate-400"
-                                )} />
+                                <Avatar className="h-8 w-8">
+                                  <AvatarFallback className="text-xs">
+                                    {getInitials(s)}
+                                  </AvatarFallback>
+                                </Avatar>
                                 <div>
-                                  <div className="font-semibold text-slate-900">
-                                    {staff.first_name} {staff.last_name}
-                                  </div>
-                                  <div className="text-xs text-slate-500 mt-0.5">{staff.email}</div>
+                                  <p className="font-medium text-slate-900">{getName(s)}</p>
+                                  <p className="text-xs text-slate-500">{s.email}</p>
                                 </div>
                               </div>
                             </td>
-                            <td className="p-4">
-                              <Badge className={cn(
-                                "text-xs font-semibold",
-                                staff.role === "SUPER_ADMIN" 
-                                  ? "bg-amber-100 text-amber-700 border-amber-200" 
-                                  : staff.role === "LINE_MANAGER"
-                                  ? "bg-blue-100 text-blue-700 border-blue-200"
-                                  : "bg-[#ec3338]/10 text-[#ec3338] border-[#ec3338]/20"
+                            <td className="px-6 py-4">
+                              <Badge variant="outline" className={cn(
+                                "text-xs",
+                                s.role === "LINE_MANAGER" 
+                                  ? "border-purple-200 text-purple-700 bg-purple-50"
+                                  : "border-slate-200"
                               )}>
-                                {staff.role}
+                                {s.role}
                               </Badge>
                             </td>
-                            <td className="p-4">
-                              <code className="bg-white px-3 py-1 rounded-lg border border-slate-200 text-xs font-mono font-semibold">
-                                {staff.id_card}
-                              </code>
-                            </td>
-                            <td className="p-4 text-sm text-slate-700">
-                              {staff.position || <span className="text-slate-400">—</span>}
-                            </td>
-                            <td className="p-4">
-                              <div className="flex flex-col gap-1.5">
-                                <Badge className={cn(
-                                  "text-xs font-semibold w-fit",
-                                  staff.isLocked 
-                                    ? "bg-rose-100 text-rose-700 border-rose-200" 
-                                    : staff.is_active 
-                                      ? "bg-emerald-100 text-emerald-700 border-emerald-200" 
-                                      : "bg-slate-100 text-slate-600 border-slate-200"
-                                )}>
-                                  {staff.isLocked ? "Locked" : staff.is_active ? "Active" : "Inactive"}
-                                </Badge>
-                                {!staff.isVerified && (
-                                  <Badge className="text-xs font-semibold w-fit bg-amber-100 text-amber-700 border-amber-200">
+                            <td className="px-6 py-4">
+                              <div className="flex flex-col gap-1">
+                                <span
+                                  className={cn(
+                                    "text-xs font-semibold",
+                                    s.isLocked
+                                      ? "text-[#ec3338]"
+                                      : s.is_active
+                                      ? "text-emerald-600"
+                                      : "text-slate-400"
+                                  )}
+                                >
+                                  {s.isLocked
+                                    ? "LOCKED"
+                                    : s.is_active
+                                    ? "ACTIVE"
+                                    : "INACTIVE"}
+                                </span>
+                                {!s.isVerified && (
+                                  <span className="text-xs text-amber-600">
                                     Unverified
-                                  </Badge>
+                                  </span>
                                 )}
                               </div>
                             </td>
-                            <td className="p-4">
-                              {manager ? (
-                                <div className="flex items-center gap-2">
-                                  <UserCog className="h-3.5 w-3.5 text-blue-600" />
-                                  <div>
-                                    <div className="text-sm font-medium text-slate-900">{getFullName(manager)}</div>
-                                    <div className="text-xs text-slate-500">Line Manager</div>
-                                  </div>
-                                </div>
-                              ) : staff.role === "LINE_MANAGER" ? (
-                                <div className="flex items-center gap-2 text-slate-400">
-                                  <Shield className="h-3.5 w-3.5" />
-                                  <span className="text-sm">Manages Department</span>
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-2 text-amber-600">
-                                  <AlertCircle className="h-3.5 w-3.5" />
-                                  <span className="text-sm font-medium">Unassigned</span>
-                                </div>
-                              )}
+                            <td className="px-6 py-4 text-right text-xs font-mono text-slate-500">
+                              {s.id_card}
                             </td>
                           </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-
-            {/* Department Location Distribution */}
-            {departmentStaff.some(emp => emp.region || emp.branch) && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-                  <div>
-                    <h4 className="font-bold text-slate-900 flex items-center gap-2">
-                      <MapPin className="h-5 w-5 text-[#ec3338]" />
-                      Location Distribution
-                    </h4>
-                    <p className="text-sm text-slate-600 mt-1">
-                      Staff distribution by region and branch
-                    </p>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  {/* By Region */}
-                  <div className="border border-slate-200 rounded-xl p-5">
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className="p-2.5 bg-[#ec3338]/10 rounded-lg">
-                        <MapPin className="h-4.5 w-4.5 text-[#ec3338]" />
-                      </div>
-                      <div>
-                        <h5 className="font-semibold text-slate-900">By Region</h5>
-                        <p className="text-sm text-slate-500">Staff count by geographical region</p>
-                      </div>
-                    </div>
-                    <div className="space-y-3">
-                      {Array.from(
-                        new Map(
-                          departmentStaff
-                            .filter(emp => emp.region)
-                            .map(emp => [emp.region, emp])
-                        ).values()
-                      ).map(emp => {
-                        const regionCount = departmentStaff.filter(s => s.region === emp.region).length
-                        const percentage = (regionCount / departmentStaff.length) * 100
-                        
-                        return (
-                          <div key={emp.region} className="space-y-1.5">
-                            <div className="flex items-center justify-between">
-                              <span className="text-sm font-medium text-slate-700">{emp.region}</span>
-                              <Badge className="bg-[#ec3338]/10 text-[#ec3338] border-[#ec3338]/20">
-                                {regionCount} staff
-                              </Badge>
-                            </div>
-                            <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                              <div 
-                                className="h-full bg-gradient-to-r from-[#ec3338] to-[#ec3338]/70 rounded-full"
-                                style={{ width: `${percentage}%` }}
-                              />
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                  
-                  {/* By Branch */}
-                  <div className="border border-slate-200 rounded-xl p-5">
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className="p-2.5 bg-blue-100 rounded-lg">
-                        <Building className="h-4.5 w-4.5 text-blue-600" />
-                      </div>
-                      <div>
-                        <h5 className="font-semibold text-slate-900">By Branch</h5>
-                        <p className="text-sm text-slate-500">Staff count by office branch</p>
-                      </div>
-                    </div>
-                    <div className="space-y-3">
-                      {Array.from(
-                        new Map(
-                          departmentStaff
-                            .filter(emp => emp.branch)
-                            .map(emp => [emp.branch, emp])
-                        ).values()
-                      ).map(emp => {
-                        const branchCount = departmentStaff.filter(s => s.branch === emp.branch).length
-                        const percentage = (branchCount / departmentStaff.length) * 100
-                        
-                        return (
-                          <div key={emp.branch} className="space-y-1.5">
-                            <div className="flex items-center justify-between">
-                              <span className="text-sm font-medium text-slate-700">{emp.branch}</span>
-                              <Badge className="bg-blue-50 text-blue-700 border-blue-200">
-                                {branchCount} staff
-                              </Badge>
-                            </div>
-                            <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                              <div 
-                                className="h-full bg-gradient-to-r from-blue-500 to-blue-400 rounded-full"
-                                style={{ width: `${percentage}%` }}
-                              />
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Footer Summary */}
-            <div className="pt-6 border-t border-slate-200">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 text-sm">
-                <div className="text-slate-600">
-                  Department ID: <code className="bg-slate-100 px-2 py-0.5 rounded text-xs font-mono ml-1">{department._id}</code>
-                </div>
-                <div className="text-slate-500">
-                  Last updated: {department.updatedAt ? formatDate(department.updatedAt) : "Recently"}
-                </div>
-              </div>
+                )}
+              </section>
             </div>
           </div>
         </ScrollArea>
 
-        <div className="border-t border-slate-200 p-4 bg-slate-50/50">
-          <div className="flex justify-end">
-            <Button
-              onClick={() => onOpenChange(false)}
-              className="gap-2 bg-[#ec3338] hover:bg-[#d42c31] shadow-sm"
-            >
-              Close View
-            </Button>
+        {/* ---------- FOOTER ---------- */}
+        <div className="bg-white border-t px-6 py-4 flex justify-between items-center">
+          <div className="text-xs text-slate-500">
+            {isLineManager 
+              ? "Viewing your assigned department only"
+              : "Department details view"}
           </div>
+          <Button onClick={() => onOpenChange(false)}>
+            Close
+          </Button>
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/* ------------------ SMALL COMPONENTS ------------------ */
+
+function Stat({ label, value, icon }: { label: string; value: any; icon?: React.ReactNode }) {
+  return (
+    <div className="rounded-lg border p-4 text-center">
+      <p className="text-xs uppercase tracking-wide text-slate-400 mb-2">{label}</p>
+      <div className="flex items-center justify-center gap-2">
+        {icon}
+        <p className="text-2xl font-bold">{value}</p>
+      </div>
+    </div>
+  )
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <h4 className="text-xs font-bold uppercase tracking-widest text-slate-400">
+      {children}
+    </h4>
+  )
+}
+
+function MetaRow({
+  icon,
+  label,
+  value,
+}: {
+  icon: React.ReactNode
+  label: string
+  value: string
+}) {
+  return (
+    <div className="flex justify-between text-sm">
+      <span className="flex items-center gap-2 text-slate-500">
+        {icon} {label}
+      </span>
+      <span className="font-medium">{value}</span>
+    </div>
+  )
+}
+
+function ProgressRow({
+  label,
+  value,
+  total,
+  color,
+  icon,
+}: {
+  label: string
+  value: number
+  total: number
+  color: string
+  icon?: React.ReactNode
+}) {
+  const percentage = Math.round((value / Math.max(total, 1)) * 100)
+  
+  return (
+    <div className="space-y-1">
+      <div className="flex justify-between text-xs font-medium">
+        <span className="flex items-center gap-1">
+          {icon}
+          {label}
+        </span>
+        <span>{value} ({percentage}%)</span>
+      </div>
+      <Progress value={percentage} className={color} />
+    </div>
+  )
+}
+
+function HeaderRow({
+  title,
+  icon,
+  count,
+}: {
+  title: string
+  icon: React.ReactNode
+  count: number
+}) {
+  return (
+    <div className="flex justify-between items-center mb-4">
+      <h3 className="flex items-center gap-2 text-sm font-bold uppercase">
+        {icon} {title}
+      </h3>
+      <Badge variant="outline">{count}</Badge>
+    </div>
   )
 }

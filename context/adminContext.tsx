@@ -200,7 +200,34 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
       setIsDepartmentLoading(true)
       setDepartmentError(null)
       const departmentsData = await adminApi.getAllDepartments()
-      setDepartments(departmentsData)
+      
+      // LINE_MANAGER can only see departments where they have direct reports
+      if (isLineManager) {
+        // First, get all users to check reporting structure
+        const allUsers = await adminApi.getAllUsers()
+        const directReportIds = allUsers
+          .filter(u => u.reportsTo && 
+            (typeof u.reportsTo === 'string' ? u.reportsTo === user?._id : u.reportsTo._id === user?._id))
+          .map(u => u._id)
+        
+        // Filter departments based on where direct reports belong
+        const filteredDepartments = departmentsData.filter(dept => {
+          // Get users in this department
+          const deptUsers = allUsers.filter(u => {
+            if (!u.department) return false
+            if (typeof u.department === 'string') return u.department === dept._id
+            return u.department._id === dept._id
+          })
+          
+          // Check if any department user is a direct report
+          return deptUsers.some(u => directReportIds.includes(u._id))
+        })
+        
+        setDepartments(filteredDepartments)
+      } else {
+        // SUPER_ADMIN sees all departments
+        setDepartments(departmentsData)
+      }
     } catch (err: any) {
       console.error("AdminContext loadDepartments error:", {
         message: err?.message,
@@ -212,7 +239,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
     } finally {
       setIsDepartmentLoading(false)
     }
-  }, [isSuperAdmin, isLineManager])
+  }, [isSuperAdmin, isLineManager, user?._id])
 
   // ======================
   // User Account Management Functions
@@ -495,7 +522,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
       loadLockedAccounts()
     }
     
-    if (isSuperAdmin) {
+    if (isSuperAdmin || isLineManager) {
       loadDepartments()
     } else {
       setDepartments([])
@@ -507,7 +534,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
       setLockedAccounts([])
       setError(null)
     }
-  }, [isAdmin, isSuperAdmin, loadUsers, loadLockedAccounts, loadDepartments])
+  }, [isAdmin, isSuperAdmin, isLineManager, loadUsers, loadLockedAccounts, loadDepartments])
 
   return (
     <AdminContext.Provider value={{ 

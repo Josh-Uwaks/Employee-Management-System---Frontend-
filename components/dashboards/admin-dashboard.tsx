@@ -170,7 +170,36 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   
   // Use optimistic data when available, otherwise use fetched data
   const displayEmployees = optimisticEmployees.length > 0 ? optimisticEmployees : employees
-  const displayDepartments = (isSuperAdmin || isLineManager) ? (optimisticDepartments.length > 0 ? optimisticDepartments : departments) : []
+
+  // Filter departments for LINE_MANAGER - only show departments where they have direct reports
+  const filteredDepartments = useMemo(() => {
+    if (isSuperAdmin) {
+      return optimisticDepartments.length > 0 ? optimisticDepartments : departments
+    } else if (isLineManager) {
+      const depts = optimisticDepartments.length > 0 ? optimisticDepartments : departments
+      
+      // LINE_MANAGER can only see departments where they have direct reports
+      return depts.filter(dept => {
+        // Get employees in this department
+        const deptEmployees = displayEmployees.filter(emp => {
+          if (!emp.department) return false
+          if (typeof emp.department === 'string') return emp.department === dept._id
+          return emp.department._id === dept._id
+        })
+        
+        // Check if any of these employees report to this LINE_MANAGER
+        return deptEmployees.some(emp => 
+          emp.reportsTo && 
+          (typeof emp.reportsTo === 'string' ? 
+           emp.reportsTo === authUser?._id : 
+           emp.reportsTo._id === authUser?._id)
+        )
+      })
+    }
+    return []
+  }, [departments, optimisticDepartments, displayEmployees, isSuperAdmin, isLineManager, authUser?._id])
+
+  const displayDepartments = filteredDepartments
   
   // Employees that will be shown in ViewDepartmentDialog depending on viewer role
   const viewDepartmentEmployees = useMemo(() => {
@@ -197,44 +226,46 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     }).length
   }, [selectedDepartment, displayEmployees])
 
-  // Get activities to display based on role
-  const getDisplayActivities = () => {
-    if (isLineManager) {
-      // LINE_MANAGER only sees activities of their direct reports
-      return allActivities.filter(activity => {
-        if (typeof activity.user === 'object') {
-          const report = displayEmployees.find(emp => 
-            emp._id === activity.user._id && 
-            emp.reportsTo && 
-            emp.reportsTo._id === authUser?._id
-          )
-          return !!report
-        }
-        return false
-      })
-    }
-    // SUPER_ADMIN sees all activities
-    return allActivities
-  }
+  // CORRECTED: Get direct reports for LINE_MANAGER
+  const directReports = useMemo(() => {
+    if (!isLineManager) return []
+    return displayEmployees.filter(emp => 
+      emp.reportsTo && 
+      (typeof emp.reportsTo === 'string' ? 
+       emp.reportsTo === authUser?._id : 
+       emp.reportsTo._id === authUser?._id) &&
+      emp.role === 'STAFF'
+    )
+  }, [displayEmployees, isLineManager, authUser?._id])
 
-  const displayActivities = getDisplayActivities()
+  // Activities will be filtered by backend, no need for frontend filtering
+  const displayActivities = allActivities // Backend already filters for LINE_MANAGER
   
   // Role-based statistics - LINE_MANAGER should see stats for their direct reports only
   const stats = useMemo(() => {
-    const total = displayEmployees.length
-    const active = displayEmployees.filter(e => !e.isLocked && e.isVerified && e.is_active).length
-    const locked = lockedAccounts.length || displayEmployees.filter(e => e.isLocked).length
-    const unverified = displayEmployees.filter(e => !e.isVerified).length
+    let relevantEmployees = displayEmployees
+    
+    // LINE_MANAGER only sees stats for their direct reports
+    if (isLineManager) {
+      relevantEmployees = directReports
+    }
+    
+    const total = relevantEmployees.length
+    const active = relevantEmployees.filter(e => !e.isLocked && e.isVerified && e.is_active).length
+    const locked = relevantEmployees.filter(e => e.isLocked).length
+    const unverified = relevantEmployees.filter(e => !e.isVerified).length
     const efficiency = total > 0 ? Math.round((active / total) * 100) : 0
     
     return { total, active, locked, unverified, efficiency }
-  }, [displayEmployees, lockedAccounts])
+  }, [displayEmployees, directReports, isLineManager])
 
-  // Location-based statistics
+  // Location-based statistics - only for relevant employees
   const locationStats = useMemo(() => {
     const statsByRegion: Record<string, { count: number; branches: Record<string, number> }> = {};
     
-    displayEmployees.forEach(employee => {
+    const relevantEmployees = isLineManager ? directReports : displayEmployees;
+    
+    relevantEmployees.forEach(employee => {
       if (employee.region) {
         if (!statsByRegion[employee.region]) {
           statsByRegion[employee.region] = { count: 0, branches: {} };
@@ -251,19 +282,20 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     });
     
     return statsByRegion;
-  }, [displayEmployees]);
+  }, [displayEmployees, directReports, isLineManager]);
 
   // Role-based access information
   const roleInfo = useMemo(() => {
     if (isLineManager) {
       return {
         title: "LINE MANAGER Dashboard",
-        description: "You can only manage your direct reports",
+        description: `You have ${directReports.length} direct report${directReports.length !== 1 ? 's' : ''} in ${displayDepartments.length} department${displayDepartments.length !== 1 ? 's' : ''}`,
         icon: Shield,
         color: "bg-blue-50 text-blue-700 border-blue-200",
-        badge: "Restricted Access",
-        showDepartments: false,
-        canRegisterUsers: false
+        badge: "Department View Access",
+        showDepartments: true,
+        canRegisterUsers: false,
+        canEditDepartments: false
       }
     } else if (isSuperAdmin) {
       return {
@@ -273,7 +305,8 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         color: "bg-emerald-50 text-emerald-700 border-emerald-200",
         badge: "Full Access",
         showDepartments: true,
-        canRegisterUsers: true
+        canRegisterUsers: true,
+        canEditDepartments: true
       }
     } else {
       return {
@@ -283,10 +316,11 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         color: "bg-slate-50 text-slate-700 border-slate-200",
         badge: "Standard Access",
         showDepartments: false,
-        canRegisterUsers: false
+        canRegisterUsers: false,
+        canEditDepartments: false
       }
     }
-  }, [isLineManager, isSuperAdmin])
+  }, [isLineManager, isSuperAdmin, directReports.length, displayDepartments.length])
 
   // Location helper functions - FIXED to accept string
   const locationHelper = useMemo(() => ({
@@ -351,10 +385,10 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
 
   // Load activities based on role and filters
   useEffect(() => {
-    if (isAdmin && activeView === "activities") {
+    if ((isAdmin || isLineManager) && activeView === "activities") {
       loadActivitiesData()
     }
-  }, [isAdmin, activeView, activitiesFilters])
+  }, [isAdmin, isLineManager, activeView, activitiesFilters])
 
   /* -------------------- Helper Functions -------------------- */
   const toggleModal = (modalName: keyof typeof modals, isOpen: boolean) => {
@@ -393,68 +427,55 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     }
   }
 
+  // CORRECTED: Simplified loadActivitiesData function
   const loadActivitiesData = async (filters: ActivitiesFilters = activitiesFilters) => {
-  // Allow LINE_MANAGER to load activities for their direct reports as well
-  if (!isAdmin && !isLineManager) return
-  
-  try {
-    // Create filtered params with proper typing
-    const filteredParams: any = {
-      date: filters.date || '',
-      status: filters.status === 'all' ? '' : filters.status,
-      region: filters.region || '',
-      branch: filters.branch || '',
-      page: filters.page,
-      limit: filters.limit
-    }
+    // Allow both Admin and LINE_MANAGER to load activities
+    if (!isAdmin && !isLineManager) return
+    
+    try {
+      // Create filtered params with proper typing
+      const filteredParams: any = {
+        date: filters.date || '',
+        status: filters.status === 'all' ? '' : filters.status,
+        region: filters.region || '',
+        branch: filters.branch || '',
+        page: filters.page,
+        limit: filters.limit
+      }
 
-    // FIX: Validate region-branch combination only when BOTH are provided and not empty
-    if (filters.region && filters.branch && 
-        filters.region.trim() !== '' && filters.branch.trim() !== '' &&
-        filters.region !== 'all' && filters.branch !== 'all') {
-      
-      // Ensure they are valid types
-      if (!REGIONS.includes(filters.region as Region)) {
-        showToast.error(`Invalid region: ${filters.region}`);
-        return;
+      // FIX: Validate region-branch combination only when BOTH are provided and not empty
+      if (filters.region && filters.branch && 
+          filters.region.trim() !== '' && filters.branch.trim() !== '' &&
+          filters.region !== 'all' && filters.branch !== 'all') {
+        
+        // Ensure they are valid types
+        if (!REGIONS.includes(filters.region as Region)) {
+          showToast.error(`Invalid region: ${filters.region}`);
+          return;
+        }
+        
+        const isValid = isValidLocationCombo(filters.region, filters.branch);
+        if (!isValid) {
+          showToast.error(`Invalid location filter combination: ${filters.region} - ${filters.branch}`);
+          return;
+        }
       }
-      
-      const isValid = isValidLocationCombo(filters.region, filters.branch);
-      if (!isValid) {
-        showToast.error(`Invalid location filter combination: ${filters.region} - ${filters.branch}`);
-        return;
-      }
-    }
 
-    if (isLineManager) {
-      // LINE_MANAGER loads activities for their direct reports
-      const directReports = displayEmployees.filter(emp => 
-        emp.reportsTo && (typeof emp.reportsTo === 'string' ? emp.reportsTo === authUser?._id : emp.reportsTo._id === authUser?._id)
-      )
+      // Simply call loadAllActivities - backend handles filtering for LINE_MANAGER
+      await loadAllActivities(filteredParams);
       
-      // Apply location filter if specified
-      const filteredReports = filters.region && filters.region !== 'all'
-        ? directReports.filter(emp => emp.region === filters.region)
-        : directReports;
+    } catch (error: any) {
+      console.error("Error loading activities:", error)
       
-      // Load activities for each direct report
-      for (const report of filteredReports) {
-        await loadActivitiesByUser(report._id, {
-          date: filteredParams.date,
-          status: filteredParams.status,
-          page: filteredParams.page,
-          limit: filteredParams.limit
-        })
+      // Handle specific error cases
+      if (error.response?.status === 403) {
+        showToast.error("Access denied. You can only view activities of your direct reports.");
+      } else {
+        showToast.error("Failed to load activities");
       }
-    } else {
-      // SUPER_ADMIN loads all activities
-      await loadAllActivities(filteredParams)
     }
-  } catch (error) {
-    console.error("Error loading activities:", error)
-    showToast.error("Failed to load activities")
   }
-}
+
   const handleReloadData = async () => {
     showToast.info("Refreshing data...")
     await refetchData('all')
@@ -635,52 +656,52 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   }
 
   const handleCreateDepartment = async () => {
-  if (!isSuperAdmin) {
-    showToast.error("Only SUPER_ADMIN can create departments")
-    return
-  }
-  
-  try {
-    console.log('Creating department with data:', departmentFormData);
-    
-    const response = await createDepartment({
-      name: departmentFormData.name,
-      code: departmentFormData.code || undefined,
-      description: departmentFormData.description || undefined
-    });
-    
-    console.log('Department creation response:', response);
-    
-    // Type guard to ensure it's a valid Department
-    if (!response || !response._id) {
-      console.error('Invalid department response:', response);
-      throw new Error("Failed to create department: Invalid response from server");
+    if (!isSuperAdmin) {
+      showToast.error("Only SUPER_ADMIN can create departments")
+      return
     }
     
-    // Now add the real department
-    const newDepartment: Department = {
-      _id: response._id,
-      name: response.name,
-      code: response.code,
-      description: response.description,
-      isActive: response.isActive,
-      createdAt: response.createdAt,
-      updatedAt: response.updatedAt
-    };
-    
-    setOptimisticDepartments(prev => [...prev, newDepartment])
-    
-    setDepartmentFormData({ name: "", code: "", description: "" })
-    toggleModal('createDept', false)
-    showToast.success("Department created successfully")
-    await refetchData('departments')
-  } catch (error: any) {
-    console.error('Error creating department:', error);
-    // Revert optimistic update on error
-    setOptimisticDepartments([])
-    showToast.error(error.message || "Failed to create department")
+    try {
+      console.log('Creating department with data:', departmentFormData);
+      
+      const response = await createDepartment({
+        name: departmentFormData.name,
+        code: departmentFormData.code || undefined,
+        description: departmentFormData.description || undefined
+      });
+      
+      console.log('Department creation response:', response);
+      
+      // Type guard to ensure it's a valid Department
+      if (!response || !response._id) {
+        console.error('Invalid department response:', response);
+        throw new Error("Failed to create department: Invalid response from server");
+      }
+      
+      // Now add the real department
+      const newDepartment: Department = {
+        _id: response._id,
+        name: response.name,
+        code: response.code,
+        description: response.description,
+        isActive: response.isActive,
+        createdAt: response.createdAt,
+        updatedAt: response.updatedAt
+      };
+      
+      setOptimisticDepartments(prev => [...prev, newDepartment])
+      
+      setDepartmentFormData({ name: "", code: "", description: "" })
+      toggleModal('createDept', false)
+      showToast.success("Department created successfully")
+      await refetchData('departments')
+    } catch (error: any) {
+      console.error('Error creating department:', error);
+      // Revert optimistic update on error
+      setOptimisticDepartments([])
+      showToast.error(error.message || "Failed to create department")
+    }
   }
-}
 
   const handleOpenEditDepartment = (department: Department) => {
     if (!isSuperAdmin) {
@@ -772,7 +793,20 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
 
   const handleExportActivities = useCallback(() => {
     try {
-      const data = displayActivities.map(activity => ({
+      // Filter activities for LINE_MANAGER if needed
+      const activitiesToExport = isLineManager 
+        ? allActivities.filter(activity => {
+            if (typeof activity.user === 'object' && activity.user.reportsTo) {
+              const reportsToId = typeof activity.user.reportsTo === 'object' 
+                ? activity.user.reportsTo._id 
+                : activity.user.reportsTo;
+              return reportsToId === authUser?._id;
+            }
+            return false;
+          })
+        : allActivities;
+
+      const data = activitiesToExport.map(activity => ({
         Date: activity.date,
         Time: activity.timeInterval,
         Employee: typeof activity.user === 'object' 
@@ -826,7 +860,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       console.error("Failed to export activities:", error)
       showToast.error("Failed to export activities")
     }
-  }, [displayActivities, locationHelper])
+  }, [allActivities, isLineManager, authUser?._id, locationHelper])
 
   const handleViewActivityDetails = (activity: any) => {
     setSelectedActivity(activity)
@@ -876,13 +910,15 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
               </div>
             </div>
 
-            {/* Stats Overview - Hide department stats for LINE_MANAGER */}
+            {/* Stats Overview - Show direct reports count for LINE_MANAGER */}
             <div className={`grid gap-4 ${isSuperAdmin ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-4' : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'}`}>
               <Card className="border-none shadow-sm bg-gradient-to-br from-blue-50 to-white">
                 <CardContent className="p-6">
                   <div className="flex items-center justify-between">
                     <div className="space-y-1">
-                      <p className="text-sm font-medium text-slate-600">Total Employees</p>
+                      <p className="text-sm font-medium text-slate-600">
+                        {isLineManager ? 'Direct Reports' : 'Total Employees'}
+                      </p>
                       <p className="text-3xl font-bold text-slate-900">{stats.total}</p>
                     </div>
                     <div className="p-3 bg-blue-100 rounded-xl">
@@ -956,9 +992,59 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                   </CardContent>
                 </Card>
               )}
-
-              
             </div>
+
+            {/* Direct Reports Card for LINE_MANAGER */}
+            {isLineManager && directReports.length > 0 && (
+              <Card className="border-none shadow-sm">
+                <CardHeader>
+                  <div className="flex items-center gap-2">
+                    <UserCheck className="text-blue-600" size={18} />
+                    <CardTitle className="text-lg font-bold">Your Direct Reports</CardTitle>
+                  </div>
+                  <CardDescription>Staff members who report directly to you</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {directReports.slice(0, 6).map(report => (
+                      <div key={report._id} className="border rounded-lg p-4 hover:bg-slate-50 transition-colors">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
+                            <span className="font-bold text-blue-600">
+                              {report.first_name?.[0]}{report.last_name?.[0]}
+                            </span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h4 className="font-semibold text-slate-900 truncate">
+                              {report.first_name} {report.last_name}
+                            </h4>
+                            <p className="text-sm text-slate-500">{report.id_card}</p>
+                          </div>
+                        </div>
+                        <div className="mt-3 flex items-center justify-between text-sm">
+                          <span className="text-slate-600">{report.position}</span>
+                          <Badge variant={report.is_active ? "default" : "secondary"} className="text-xs">
+                            {report.is_active ? "Active" : "Inactive"}
+                          </Badge>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {directReports.length > 6 && (
+                    <div className="mt-4 pt-4 border-t border-slate-100 text-center">
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        onClick={() => setActiveView("employees")}
+                        className="text-blue-600 hover:text-blue-700"
+                      >
+                        View all {directReports.length} direct reports →
+                      </Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
             {/* Location Distribution Card - Only show for SUPER_ADMIN */}
             {isSuperAdmin && Object.keys(locationStats).length > 0 && (
@@ -1034,7 +1120,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                     <div className="flex justify-between items-center text-sm p-3 bg-white/5 rounded-lg border border-white/10">
                       <span className="text-slate-300 font-medium">Locked Accounts</span>
                       <Badge variant="outline" className="border-amber-500/30 text-amber-400 bg-amber-500/10">
-                        {lockedAccounts.length}
+                        {stats.locked}
                       </Badge>
                     </div>
                     <div className="flex justify-between items-center text-sm p-3 bg-white/5 rounded-lg border border-white/10">
@@ -1118,6 +1204,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             isAdmin={isAdmin}
             isSuperAdmin={isSuperAdmin}
             isLineManager={isLineManager}
+            directReportsCount={directReports.length}
             onFilterChange={(newFilters) => {
               const normalizedFilters: ActivitiesFilters = {
                 ...newFilters,
@@ -1146,12 +1233,34 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
               </div>
               <h3 className="font-semibold text-slate-700 mb-1">Access Restricted</h3>
               <p className="text-sm text-slate-500 max-w-md mb-4">
-                Only SUPER_ADMIN can manage departments. Please contact your system administrator.
+                Only SUPER_ADMIN and LINE_MANAGERS can view departments.
               </p>
-              <Badge className="bg-amber-100 text-amber-700 border-amber-200">SUPER_ADMIN Only</Badge>
+              <Badge className="bg-amber-100 text-amber-700 border-amber-200">
+                {isLineManager ? "No Departments Assigned" : "SUPER_ADMIN/LINE_MANAGER Only"}
+              </Badge>
             </div>
           )
         }
+        
+        // Show message if LINE_MANAGER has no departments with direct reports
+        if (isLineManager && displayDepartments.length === 0) {
+          return (
+            <div className="flex flex-col items-center justify-center py-16 text-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50">
+              <div className="p-4 bg-white rounded-full shadow-sm mb-4">
+                <Building2 className="text-slate-300" size={32} />
+              </div>
+              <h3 className="font-semibold text-slate-700 mb-1">No Assigned Departments</h3>
+              <p className="text-sm text-slate-500 max-w-md mb-4">
+                You don't have any direct reports in any departments yet.
+                Departments will appear here when staff members are assigned to you.
+              </p>
+              <Badge className="bg-blue-100 text-blue-700 border-blue-200">
+                View Only Access
+              </Badge>
+            </div>
+          )
+        }
+        
         return (
           <DepartmentManagement
             departments={displayDepartments}
@@ -1159,6 +1268,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             searchQuery={searchQuery}
             isLoading={isDepartmentLoading || isRefetching}
             isActionLoading={isActionLoading}
+            canEditDepartments={isSuperAdmin}
             onSearchChange={setSearchQuery}
             onCreateDepartment={isSuperAdmin ? () => toggleModal('createDept', true) : undefined}
             onViewDepartment={handleViewDepartment}
@@ -1244,7 +1354,9 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                       {activeView === 'overview' 
                         ? `Welcome back, ${authUser?.first_name}. System is operating normally.`
                         : isLineManager && activeView === 'employees'
-                          ? "Managing your direct reports"
+                          ? `Managing your ${directReports.length} direct report${directReports.length !== 1 ? 's' : ''}`
+                          : isLineManager && activeView === 'activities'
+                          ? `Viewing activities of your direct reports`
                           : `Manage your ${activeView} efficiently`
                       }
                     </p>
@@ -1346,16 +1458,19 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             isActionLoading={isActionLoading} 
             onDelete={handleDeleteDepartment} 
           />
-
-<ViewDepartmentDialog
-    open={modals.viewDept}
-    onOpenChange={(s) => toggleModal('viewDept', s)}
-    department={selectedDepartment}
-    employees={viewDepartmentEmployees}
-    totalStaffCount={viewDepartmentTotal}
-  />
         </>
       )}
+
+      {/* View Department Dialog - Available for both SUPER_ADMIN and LINE_MANAGER */}
+      <ViewDepartmentDialog
+        open={modals.viewDept}
+        onOpenChange={(s) => toggleModal('viewDept', s)}
+        department={selectedDepartment}
+        employees={viewDepartmentEmployees}
+        totalStaffCount={viewDepartmentTotal}
+        isLineManager={isLineManager}
+        authUserId={authUser?._id}
+      />
 
       {/* Activity Details Dialog */}
       <ActivityDetailsDialog

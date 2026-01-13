@@ -33,9 +33,10 @@ interface DepartmentManagementProps {
   searchQuery: string
   isLoading: boolean
   isActionLoading: boolean
+  canEditDepartments?: boolean
   onSearchChange: (query: string) => void
   onCreateDepartment?: () => void
-  onViewDepartment: (department: Department) => void  // Read-only view still requires view callback
+  onViewDepartment: (department: Department) => void
   onEditDepartment?: (department: Department) => void
   onToggleStatus?: (departmentId: string) => void
   onDeleteDepartment?: (department: Department) => void
@@ -47,9 +48,10 @@ export default function DepartmentManagement({
   searchQuery,
   isLoading,
   isActionLoading,
+  canEditDepartments = false,
   onSearchChange,
   onCreateDepartment,
-  onViewDepartment,  // Add this line
+  onViewDepartment,
   onEditDepartment,
   onToggleStatus,
   onDeleteDepartment,
@@ -119,7 +121,7 @@ export default function DepartmentManagement({
           />
         </div>
         
-        {onCreateDepartment && (
+        {canEditDepartments && onCreateDepartment && (
           <Button
             onClick={onCreateDepartment}
             className="gap-2 bg-[#ec3338] hover:bg-[#d42c31] shadow-sm text-white"
@@ -127,6 +129,12 @@ export default function DepartmentManagement({
             <Plus className="h-4 w-4" />
             Create New Department
           </Button>
+        )}
+        
+        {!canEditDepartments && (
+          <Badge className="bg-blue-100 text-blue-700 border-blue-200">
+            View Only Mode
+          </Badge>
         )}
       </div>
 
@@ -183,7 +191,7 @@ export default function DepartmentManagement({
               ? "Try adjusting your search term" 
               : "Create your first department to organize your staff"}
           </p>
-          {!searchQuery && onCreateDepartment && (
+          {!searchQuery && canEditDepartments && onCreateDepartment && (
             <Button 
               onClick={onCreateDepartment}
               className="gap-2 border-[#ec3338]/20 text-[#ec3338] hover:bg-[#ec3338]/5"
@@ -298,8 +306,6 @@ export default function DepartmentManagement({
                 </div>
                 
                 <div className="flex flex-col sm:flex-row gap-2 flex-shrink-0">
-          
-                  
                   <Button 
                     variant="outline" 
                     size="sm" 
@@ -311,7 +317,7 @@ export default function DepartmentManagement({
                     View
                   </Button>
                   
-                  {onEditDepartment && (
+                  {canEditDepartments && onEditDepartment && (
                     <Button 
                       variant="outline" 
                       size="sm" 
@@ -324,7 +330,7 @@ export default function DepartmentManagement({
                     </Button>
                   )}
                   
-                  {onToggleStatus && (
+                  {canEditDepartments && onToggleStatus && (
                     <Button 
                       variant="outline" 
                       size="sm" 
@@ -356,24 +362,17 @@ export default function DepartmentManagement({
                     <DropdownMenuContent align="end" className="w-48">
                       <DropdownMenuLabel className="text-xs font-medium">Department Options</DropdownMenuLabel>
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem className="gap-2 text-xs cursor-pointer">
-                        <ExternalLink size={14} />
-                        Details
-                      </DropdownMenuItem>
                       <DropdownMenuItem 
-                        className="gap-2 text-xs text-red-600 cursor-pointer"
+                        className="gap-2 text-xs cursor-pointer"
                         onClick={() => onViewDepartment(dept)}
                       >
                         <Eye size={14} />
                         View Details
                       </DropdownMenuItem>
-                      <DropdownMenuItem className="gap-2 text-xs cursor-pointer">
-                        <ExternalLink size={14} />
-                        Staff List
-                      </DropdownMenuItem>
                       {onDeleteDepartment ? (
                         <DropdownMenuItem 
-                          className="gap-2 text-xs text-red-600 cursor-pointer"                        disabled={hasStaff || isActionLoading}
+                          className="gap-2 text-xs text-red-600 cursor-pointer"
+                          disabled={hasStaff || isActionLoading}
                           onClick={() => onDeleteDepartment(dept)}
                         >
                           <Trash2 size={14} />
