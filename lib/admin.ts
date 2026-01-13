@@ -533,11 +533,13 @@ export const toggleDepartmentStatus = async (departmentId: string): Promise<Depa
 /**
  * Get all activities (Admin only)
  */
+// lib/admin.ts - Update getAllActivities function signature
 export const getAllActivities = async (params?: {
   date?: string;
   status?: 'pending' | 'ongoing' | 'completed';
   region?: string;
   branch?: string;
+  user?: string;  // ADDED
   page?: number;
   limit?: number;
 }): Promise<ActivitiesResponse> => {

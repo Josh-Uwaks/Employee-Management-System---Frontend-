@@ -1,6 +1,8 @@
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { 
   Shield, 
@@ -73,6 +75,9 @@ export default function Sidebar({
       default: return undefined
     }
   }
+
+  // State for logout confirmation dialog
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false) 
 
   return (
     <aside 
@@ -192,7 +197,7 @@ export default function Sidebar({
         
         <Button 
           variant="ghost" 
-          onClick={onLogout} 
+          onClick={() => setLogoutConfirmOpen(true)} 
           className={`w-full gap-2 text-slate-500 hover:text-red-600 hover:bg-red-50 transition-colors rounded-xl ${
             !sidebarOpen && "px-0 justify-center"
           }`}
@@ -200,6 +205,35 @@ export default function Sidebar({
           <LogOut size={18} />
           {sidebarOpen && <span className="text-sm font-medium">Sign Out</span>}
         </Button>
+
+        <Dialog open={logoutConfirmOpen} onOpenChange={setLogoutConfirmOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="text-destructive">Confirm Sign Out</DialogTitle>
+            </DialogHeader>
+
+            <div className="mt-2 text-sm text-muted-foreground">
+              Are you sure you want to sign out? You will be redirected to the login page.
+            </div>
+
+            <DialogFooter className="sm:justify-between mt-4">
+              <Button type="button" variant="outline" onClick={() => setLogoutConfirmOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={() => {
+                  setLogoutConfirmOpen(false)
+                  onLogout()
+                }}
+                className="gap-2"
+              >
+                Sign out
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </aside>
   )

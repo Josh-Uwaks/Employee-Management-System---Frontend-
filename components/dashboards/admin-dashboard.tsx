@@ -59,12 +59,13 @@ type ViewItem = {
   icon: LucideIcon;
 };
 
-// Type for activities filters
+// UPDATED: Include user in filters
 interface ActivitiesFilters {
   date: string;
   status: string;
   region: Region | "" | "all";
   branch: Branch | "" | "all";
+  user: string;
   page: number;
   limit: number;
 }
@@ -114,12 +115,13 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   const [optimisticEmployees, setOptimisticEmployees] = useState<Employee[]>([])
   const [optimisticDepartments, setOptimisticDepartments] = useState<Department[]>([])
 
-  // Activities state
+  // UPDATED: Initialize with user filter
   const [activitiesFilters, setActivitiesFilters] = useState<ActivitiesFilters>({
     date: "",
     status: "",
     region: "",
     branch: "",
+    user: "",
     page: 1,
     limit: 20
   })
@@ -427,7 +429,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     }
   }
 
-  // CORRECTED: Simplified loadActivitiesData function
+  // UPDATED: Simplified loadActivitiesData function with user filter
   const loadActivitiesData = async (filters: ActivitiesFilters = activitiesFilters) => {
     // Allow both Admin and LINE_MANAGER to load activities
     if (!isAdmin && !isLineManager) return
@@ -441,6 +443,11 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         branch: filters.branch || '',
         page: filters.page,
         limit: filters.limit
+      }
+
+      // ADDED: Include user filter if selected
+      if (filters.user && filters.user.trim() !== '') {
+        filteredParams.user = filters.user;
       }
 
       // FIX: Validate region-branch combination only when BOTH are provided and not empty
@@ -572,24 +579,40 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   }
 
   const handleOpenEdit = (employee: Employee) => {
-    // Check if LINE_MANAGER can manage this user
-    if (isLineManager && !canManageUser(employee)) {
-      showToast.error("You can only edit your direct reports")
-      return
-    }
-    
-    setSelectedEmployee(employee)
-    setEditFormData({
-      first_name: employee.first_name,
-      last_name: employee.last_name,
-      role: employee.role,
-      department: typeof employee.department === 'object' ? employee.department._id : employee.department || "",
-      region: employee.region || undefined,
-      branch: employee.branch || undefined,
-      position: employee.position || "",
-    })
-    toggleModal('edit', true)
+  // Check if LINE_MANAGER can manage this user
+  if (isLineManager && !canManageUser(employee)) {
+    showToast.error("You can only edit your direct reports")
+    return
   }
+  
+  setSelectedEmployee(employee)
+  
+  // DEFENSIVE: Handle all cases of department
+  let departmentId = ""
+  try {
+    if (employee.department) {
+      if (typeof employee.department === 'object' && employee.department._id) {
+        departmentId = employee.department._id
+      } else if (typeof employee.department === 'string') {
+        departmentId = employee.department
+      }
+    }
+  } catch (error) {
+    console.error("Error extracting department ID:", error)
+    departmentId = ""
+  }
+  
+  setEditFormData({
+    first_name: employee.first_name,
+    last_name: employee.last_name,
+    role: employee.role,
+    department: departmentId,
+    region: employee.region || undefined,
+    branch: employee.branch || undefined,
+    position: employee.position || "",
+  })
+  toggleModal('edit', true)
+}
 
   const handleSaveEdit = async () => {
     if (!selectedEmployee) return
@@ -1195,6 +1218,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         )
       case "activities":
         return (
+          // UPDATED: Pass directReports to ActivitiesManagement
           <ActivitiesManagement
             activities={displayActivities}
             stats={activitiesStats}
@@ -1205,12 +1229,14 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             isSuperAdmin={isSuperAdmin}
             isLineManager={isLineManager}
             directReportsCount={directReports.length}
+            directReports={directReports}  // ADDED
             onFilterChange={(newFilters) => {
               const normalizedFilters: ActivitiesFilters = {
                 ...newFilters,
                 status: newFilters.status === 'all' ? '' : newFilters.status,
                 region: newFilters.region || "",
                 branch: newFilters.branch || "",
+                user: newFilters.user || "",  // ADDED
               }
               setActivitiesFilters(normalizedFilters)
               loadActivitiesData(normalizedFilters)

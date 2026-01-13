@@ -413,51 +413,53 @@ export const ActivitiesProvider = ({ children }: { children: ReactNode }) => {
   // ======================
   // Admin Activities Functions
   // ======================
-  const loadAllActivities = useCallback(async (params?: {
-    date?: string;
-    status?: 'pending' | 'ongoing' | 'completed';
-    region?: string;
-    branch?: string;
-    page?: number;
-    limit?: number;
-  }): Promise<void> => {
-    if (!isAdmin) {
-      setAllActivities([])
-      setAdminActivitiesError("Admin access required")
-      return
-    }
+  // context/activitiesContext.tsx - Update loadAllActivities function
+const loadAllActivities = useCallback(async (params?: {
+  date?: string;
+  status?: 'pending' | 'ongoing' | 'completed';
+  region?: string;
+  branch?: string;
+  user?: string;  // ADDED: user filter
+  page?: number;
+  limit?: number;
+}): Promise<void> => {
+  if (!isAdmin) {
+    setAllActivities([])
+    setAdminActivitiesError("Admin access required")
+    return
+  }
 
-    try {
-      setAdminActivitiesLoading(true)
-      setAdminActivitiesError(null)
-      
-      const response = await adminApi.getAllActivities(params)
-      
-      if (response.success) {
-        setAllActivities(response.data || [])
-        setActivitiesStats(response.stats || null)
-        setActivitiesPagination(response.pagination || null)
-      } else {
-        throw new Error(response.message || "Failed to fetch activities")
-      }
-    } catch (error: any) {
-      console.error("loadAllActivities error:", error)
-      
-      let errorMessage = error.message || "Failed to fetch activities"
-      
-      if (error.error === 'INSUFFICIENT_PERMISSIONS') {
-        errorMessage = "Insufficient permissions to view all activities"
-      } else if (error.error === 'VALIDATION_ERROR') {
-        errorMessage = "Invalid filter parameters"
-      }
-      
-      setAdminActivitiesError(errorMessage)
-      setAllActivities([])
-      showToast.error(errorMessage)
-    } finally {
-      setAdminActivitiesLoading(false)
+  try {
+    setAdminActivitiesLoading(true)
+    setAdminActivitiesError(null)
+    
+    const response = await adminApi.getAllActivities(params)
+    
+    if (response.success) {
+      setAllActivities(response.data || [])
+      setActivitiesStats(response.stats || null)
+      setActivitiesPagination(response.pagination || null)
+    } else {
+      throw new Error(response.message || "Failed to fetch activities")
     }
-  }, [isAdmin])
+  } catch (error: any) {
+    console.error("loadAllActivities error:", error)
+    
+    let errorMessage = error.message || "Failed to fetch activities"
+    
+    if (error.error === 'INSUFFICIENT_PERMISSIONS') {
+      errorMessage = "Insufficient permissions to view all activities"
+    } else if (error.error === 'VALIDATION_ERROR') {
+      errorMessage = "Invalid filter parameters"
+    }
+    
+    setAdminActivitiesError(errorMessage)
+    setAllActivities([])
+    showToast.error(errorMessage)
+  } finally {
+    setAdminActivitiesLoading(false)
+  }
+}, [isAdmin])
 
   const loadActivitiesByUser = useCallback(async (userId: string, params?: {
     date?: string;
