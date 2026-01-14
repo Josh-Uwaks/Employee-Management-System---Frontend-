@@ -144,8 +144,8 @@ export default function LoginPage({ onNext }: LoginPageProps) {
       <div className="w-full max-w-md">
         {/* Mobile Header */}
         <div className="lg:hidden flex items-center justify-center gap-3 mb-8">
-          <div className="w-12 h-12 bg-red-600 rounded-xl flex items-center justify-center">
-            <Activity className="w-7 h-7 text-white" />
+          <div className="">
+            <img src="/kadick_logo.png" alt="Kadick" className="" />
           </div>
           <div className="text-center">
             <h1 className="text-2xl font-bold text-gray-800">Kadick Daily Log</h1>
@@ -154,13 +154,13 @@ export default function LoginPage({ onNext }: LoginPageProps) {
         </div>
 
         {/* Desktop Header */}
-        <div className="hidden lg:block text-center mb-8">
-          <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ backgroundColor: '#ec3338' }}>
-            <Lock className="w-8 h-8 text-white" />
-          </div>
-          <h1 className="text-3xl font-bold text-gray-800 mb-2">Kadick Daily Log</h1>
-          <p className="text-gray-600">Monitoring System</p>
-        </div>
+        <div className="flex justify-center mb-6">
+  <img
+    src="/kadick_logo.png"
+    alt="Kadick"
+    className="h-14 w-auto object-contain"
+  />
+</div>
 
         
 

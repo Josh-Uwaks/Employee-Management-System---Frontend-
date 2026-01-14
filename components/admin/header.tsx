@@ -7,7 +7,6 @@ import {
 } from "@/components/ui/tooltip"
 import { 
   Clock, 
-  RefreshCw, 
   Bell, 
   ChevronRight, 
   LayoutDashboard,
@@ -31,7 +30,7 @@ export default function Header({
   isActionLoading,
   onReloadData,
 }: HeaderProps) {
-  // Format view title with proper casing
+  
   const formatViewTitle = (view: string) => {
     return view
       .split('-')
@@ -41,78 +40,83 @@ export default function Header({
 
   return (
     <TooltipProvider>
-      <header className="h-20 flex items-center justify-between px-6 lg:px-8 bg-white/95 backdrop-blur-xl border-b border-slate-200/70 sticky top-0 z-30 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+      <header className="h-16 flex items-center justify-between px-6 lg:px-8 bg-white/95 backdrop-blur-xl border-b border-slate-200/70 sticky top-0 z-30">
         
-        {/* Left Side: Breadcrumbs & View Title */}
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-center gap-2 text-[11px] font-semibold text-slate-500 uppercase tracking-[0.15em]">
-            <div className="flex items-center gap-2">
-              <div className="p-1.5 bg-gradient-to-br from-red-50 to-red-100 rounded-lg">
-                <LayoutDashboard size={12} className="text-red-600" />
+        {/* Left Side: Professional Breadcrumbs */}
+        <div className="flex flex-col">
+          <nav className="flex items-center gap-2 text-[12px] tracking-tight">
+            <div className="flex items-center gap-2 text-slate-400">
+              <div className="p-1 rounded bg-slate-50 border border-slate-100">
+                <LayoutDashboard size={12} className="text-slate-400" />
               </div>
-              <span className="font-bold text-slate-700">KADICK</span>
-              <ChevronRight size={12} className="text-slate-300 mx-1" />
-              <span className="text-slate-600">Admin Panel</span>
-              <ChevronRight size={12} className="text-slate-300 mx-1" />
-              <span className="text-red-600 font-semibold">{formatViewTitle(activeView)}</span>
+              <span className="font-medium">Kadick</span>
             </div>
-          </div>
-          <div className="flex items-center gap-3">
-            {/* <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-              {formatViewTitle(activeView)}
-            </h1> */}
-            {isLoading && (
-              <Badge variant="outline" className="h-6 px-2 text-xs font-medium border-blue-200 bg-blue-50 text-blue-700 animate-pulse">
-                Syncing...
-              </Badge>
-            )}
-            {isActionLoading && (
-              <Badge variant="outline" className="h-6 px-2 text-xs font-medium border-amber-200 bg-amber-50 text-amber-700 animate-pulse">
-                Processing...
-              </Badge>
-            )}
-          </div>
+            
+            <ChevronRight size={12} className="text-slate-300" />
+            
+            <span className="text-slate-400 font-medium px-1">Admin Panel</span>
+            
+            <ChevronRight size={12} className="text-slate-300" />
+            
+            <div className="flex items-center gap-2 px-1">
+              <span className="text-[#ec3338] font-semibold">
+                {formatViewTitle(activeView)}
+              </span>
+              
+              {/* Status Indicators - Compact & Quiet */}
+              <div className="flex gap-1 ml-2">
+                {isLoading && (
+                  <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-50 border border-blue-100">
+                    <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" />
+                    <span className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">Syncing</span>
+                  </div>
+                )}
+                {isActionLoading && (
+                  <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-50 border border-amber-100">
+                    <div className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
+                    <span className="text-[10px] font-semibold text-amber-600 uppercase tracking-wider">Active</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </nav>
         </div>
 
         {/* Right Side: Actions & Utilities */}
-        <div className="flex items-center gap-4">
-          {/* Time Display */}
-          <div className="hidden lg:flex items-center gap-3 bg-gradient-to-br from-slate-50 to-white border border-slate-200/80 px-4 py-2.5 rounded-xl shadow-sm">
-            <div className="relative">
-              <Clock size={16} className="text-red-600" />
-              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-green-500 rounded-full border-2 border-white" />
-            </div>
-            <div className="flex flex-col">
-              <span className="font-mono text-sm font-bold text-slate-800 tabular-nums">
+        <div className="flex items-center gap-3">
+          
+          {/* Time Display - Reduced weight, tabular numbers for stability */}
+          <div className="hidden md:flex items-center gap-3 px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg">
+            <Clock size={14} className="text-slate-400" />
+            <div className="flex flex-col leading-none">
+              <span className="font-mono text-sm font-semibold text-slate-700 tabular-nums">
                 {currentTime.toLocaleTimeString("en-NG", { 
                   hour: '2-digit', 
                   minute: '2-digit',
                   hour12: false 
                 })}
               </span>
-              <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wider">
-                GMT+1
+              <span className="text-[9px] text-slate-400 font-bold uppercase tracking-tighter mt-0.5">
+                WAT / GMT+1
               </span>
             </div>
           </div>
 
-          <div className="h-6 w-[1px] bg-gradient-to-b from-transparent via-slate-300 to-transparent mx-1 hidden md:block" />
+          <div className="h-8 w-[1px] bg-slate-200 mx-1 hidden lg:block" />
 
-          {/* Utility Icons */}
-          <div className="flex items-center gap-0.5">
+          {/* Utility Icons - Harmonized sizing */}
+          <div className="flex items-center gap-1">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button 
                   variant="ghost" 
                   size="icon" 
-                  className="rounded-xl h-10 w-10 text-slate-500 hover:text-slate-900 hover:bg-slate-100/80 transition-all duration-200"
+                  className="rounded-lg h-9 w-9 text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors"
                 >
-                  <HelpCircle size={20} />
+                  <HelpCircle size={18} />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent side="bottom" className="bg-slate-900 text-white text-xs font-medium px-3 py-1.5">
-                Support & Documentation
-              </TooltipContent>
+              <TooltipContent className="bg-slate-900 text-white text-[11px] font-medium">Support</TooltipContent>
             </Tooltip>
 
             <Tooltip>
@@ -120,14 +124,12 @@ export default function Header({
                 <Button 
                   variant="ghost" 
                   size="icon" 
-                  className="rounded-xl h-10 w-10 text-slate-500 hover:text-slate-900 hover:bg-slate-100/80 transition-all duration-200"
+                  className="rounded-lg h-9 w-9 text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors"
                 >
-                  <Settings size={20} />
+                  <Settings size={18} />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent side="bottom" className="bg-slate-900 text-white text-xs font-medium px-3 py-1.5">
-                System Settings
-              </TooltipContent>
+              <TooltipContent className="bg-slate-900 text-white text-[11px] font-medium">Settings</TooltipContent>
             </Tooltip>
 
             <Tooltip>
@@ -135,57 +137,15 @@ export default function Header({
                 <Button 
                   variant="ghost" 
                   size="icon" 
-                  className="rounded-xl h-10 w-10 text-slate-500 hover:text-red-600 hover:bg-red-50/80 relative transition-all duration-200 group"
+                  className="relative rounded-lg h-9 w-9 text-slate-500 hover:text-[#ec3338] hover:bg-red-50 transition-all group"
                 >
-                  <Bell size={20} className="group-hover:scale-110 transition-transform duration-300" />
-                  <span className="absolute top-2.5 right-2.5 w-2.5 h-2.5 bg-red-600 rounded-full border-2 border-white animate-pulse" />
+                  <Bell size={18} className="group-hover:rotate-12 transition-transform" />
+                  <span className="absolute top-2 right-2 w-2 h-2 bg-[#ec3338] rounded-full ring-2 ring-white" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent side="bottom" className="bg-slate-900 text-white text-xs font-medium px-3 py-1.5">
-                Notifications
-              </TooltipContent>
+              <TooltipContent className="bg-slate-900 text-white text-[11px] font-medium">Alerts</TooltipContent>
             </Tooltip>
           </div>
-
-          {/* Primary Action: Sync Button */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button 
-                onClick={onReloadData} 
-                disabled={isLoading || isActionLoading} 
-                className={`
-                  relative overflow-hidden group rounded-xl px-5 h-11 gap-3 
-                  transition-all duration-300 shadow-sm border
-                  ${isLoading || isActionLoading 
-                    ? "bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed" 
-                    : "bg-gradient-to-br from-slate-900 to-slate-800 hover:from-red-600 hover:to-red-700 text-white border-slate-700 hover:border-red-500 active:scale-[0.98]"
-                  }
-                `}
-              >
-                <div className="relative">
-                  <RefreshCw 
-                    size={18} 
-                    className={`
-                      transition-all duration-500
-                      ${isLoading || isActionLoading 
-                        ? "animate-spin" 
-                        : "group-hover:rotate-180"
-                      }
-                    `} 
-                  />
-                  {!isLoading && !isActionLoading && (
-                    <span className="absolute inset-0 bg-white/20 rounded-full scale-0 group-hover:scale-150 transition-transform duration-700" />
-                  )}
-                </div>
-                <span className="font-bold text-sm tracking-tight">
-                  {isLoading || isActionLoading ? "Syncing..." : "Sync"}
-                </span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="bg-slate-900 text-white text-xs font-medium px-3 py-1.5">
-              Refresh all dashboard data
-            </TooltipContent>
-          </Tooltip>
         </div>
       </header>
     </TooltipProvider>

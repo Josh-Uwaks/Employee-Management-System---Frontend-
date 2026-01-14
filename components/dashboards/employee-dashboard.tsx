@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { useAuth } from "@/context/authContext"
 import { useActivities } from "@/context/activitiesContext"
+import { adminApi } from "@/lib/admin"  // Import adminApi directly
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { LogOut, Bell, Calendar, Activity, Clock, AlertTriangle, Table, Eye, BarChart2, Download, CheckCircle2, XCircle, Loader2, Edit, Save, X } from "lucide-react"
@@ -14,9 +15,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { showToast } from "@/lib/toast"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Badge } from "../ui/badge"
 import DashboardTimer from "@/components/employee/timer"
 
 // --- UTILITY FUNCTIONS ---
@@ -203,6 +202,7 @@ const hasWorkSlotStartedToday = (): boolean => {
 
 export default function EmployeeDashboard({ onLogout }: EmployeeDashboardProps) {
   const { user } = useAuth()
+  
   const { 
     personalActivities, 
     personalActivitiesStats, 
@@ -247,8 +247,13 @@ export default function EmployeeDashboard({ onLogout }: EmployeeDashboardProps) 
   const todayNormalized = normalizeDateForComparison(new Date())
   const isToday = normalizeDateForComparison(selectedDate) === todayNormalized
 
-  const userName = user ? `${user.first_name} ${user.last_name}` : "Employee"
+  const capitalize = (s?: string) => s ? s.split(' ').map(w => w ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : '').join(' ') : ''
+  const userName = user ? ([user.first_name, user.last_name].filter(Boolean).map(capitalize).join(' ') || "Employee") : "Employee"
   const userId = user?._id || ""
+
+  // Department states
+  const [departmentName, setDepartmentName] = useState<string>("N/A")
+  const [isLoadingDepartment, setIsLoadingDepartment] = useState<boolean>(false)
 
   // Get department name
   const getDepartmentName = (): string => {
@@ -260,6 +265,55 @@ export default function EmployeeDashboard({ onLogout }: EmployeeDashboardProps) 
     
     return String(user.department) || "N/A"
   }
+
+  console.log("user", user);
+
+  const fetchDepartmentName = useCallback(async () => {
+    if (!user?.department) {
+      setDepartmentName("N/A")
+      return
+    }
+
+    try {
+      setIsLoadingDepartment(true)
+      let departmentId: string | undefined
+
+      if (typeof user.department === 'string') {
+        departmentId = user.department
+      } else if (typeof user.department === 'object' && user.department !== null) {
+        departmentId = user.department._id
+      }
+
+      if (!departmentId) {
+        setDepartmentName("N/A")
+        return
+      }
+
+      const department = await adminApi.getDepartmentById(departmentId)
+      if (department && department.name) {
+        setDepartmentName(department.name)
+      } else {
+        setDepartmentName("N/A")
+      }
+    } catch (error: any) {
+      console.error("Error fetching department:", error)
+      if (user?.department && typeof user.department === 'object' && user.department._id) {
+        setDepartmentName(`Dept ID: ${user.department._id}`)
+      } else {
+        setDepartmentName("N/A")
+      }
+    } finally {
+      setIsLoadingDepartment(false)
+    }
+  }, [user?.department])
+
+  useEffect(() => {
+    if (user?.department) {
+      fetchDepartmentName()
+    } else {
+      setDepartmentName("N/A")
+    }
+  }, [user?.department, fetchDepartmentName])
 
   // Get position
   const getPosition = (): string => {
@@ -728,137 +782,144 @@ export default function EmployeeDashboard({ onLogout }: EmployeeDashboardProps) 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-red-50/30 to-slate-50">
       {/* Header */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-10 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between gap-4">
-            
-            {/* Left Side - Company Branding & User Info */}
-            <div className="flex items-center gap-4 min-w-0 flex-1">
-              {/* Company Logo */}
-              <div className="relative shrink-0">
-                <div className="w-12 h-12 bg-gradient-to-br from-red-600 to-red-700 rounded-2xl flex items-center justify-center shadow-lg shadow-red-200/50">
-                  <Activity className="w-7 h-7 text-white" />
-                </div>
-              </div>
+      <header className="bg-white/90 backdrop-blur-md border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+  <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
+    <div className="flex items-center justify-between gap-4">
+      
+      {/* Left Side: Branding & Identity */}
+      <div className="flex items-center gap-4 min-w-0">
+        <div className="shrink-0">
+          <img
+            src="/kadick_logo.png"
+            alt="Kadick"
+            className="h-9 sm:h-11 w-auto object-contain"
+          />
+        </div>
 
-              {/* User Welcome */}
-              <div className="min-w-0 flex-1">
-                <h1 className="text-lg sm:text-xl font-bold text-slate-800 tracking-tight truncate">
-                  Welcome, {userName}
-                </h1>
-                <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm text-slate-500">
-                  <Clock className="w-3.5 h-3.5 flex-shrink-0" />
-                  <span className="truncate">{user.region || "N/A"} / {user.branch || "N/A"}</span>
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700 border border-green-300">
-                    {user.role || "Employee"}
-                  </span>
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700 border border-blue-300">
-                    {getDepartmentName()}
-                  </span>
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-700 border border-purple-300">
-                    {getPosition()}
-                  </span>
-                </div>
-              </div>
+        {/* Subtle Divider */}
+        <div className="hidden md:block h-8 w-px bg-slate-200" />
+
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h1 className="text-base sm:text-lg font-bold text-slate-900 leading-tight truncate">
+              {userName}
+            </h1>
+            <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200 uppercase tracking-tight">
+              {getPosition()}
+            </span>
+          </div>
+          
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-0.5 text-xs text-slate-500">
+            <div className="flex items-center gap-1">
+              <Clock className="w-3 h-3 text-slate-400" />
+              <span className="truncate font-medium">{user.region || "N/A"} • {user.branch || "N/A"}</span>
             </div>
-
-            {/* Right Side - Stats, Notifications & Actions */}
-            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-              
-              {/* Missed Slots Indicator */}
-              {missedSlots > 0 && (
-                <div className="hidden md:flex items-center gap-2 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-300 rounded-xl px-4 py-2.5 shadow-sm">
-                  <div className="w-10 h-10 bg-amber-500 rounded-lg flex items-center justify-center shadow-md">
-                    <AlertTriangle className="w-5 h-5 text-white" />
-                  </div>
-                  <div className="text-left">
-                    <p className="text-xs font-medium text-amber-600 uppercase tracking-wide">Missed Slots</p>
-                    <p className="text-2xl font-bold text-amber-900 leading-none">{missedSlots}</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Mobile Missed Slots Badge */}
-              {missedSlots > 0 && (
-                <button
-                  onClick={() => {
-                    setSelectedDate(normalizeDateForComparison(new Date()))
-                    showToast.info("Switched to today's view")
-                  }}
-                  className="md:hidden relative p-2.5 hover:bg-amber-50 rounded-xl transition-all duration-200 group border-2 border-amber-300 bg-amber-50"
-                >
-                  <AlertTriangle className="w-5 h-5 text-amber-600" />
-                  <span className="absolute -top-1 -right-1 bg-amber-600 text-white text-[10px] rounded-full w-5 h-5 flex items-center justify-center font-bold">
-                    {missedSlots}
-                  </span>
-                </button>
-              )}
-              
-              {/* Notifications Popover */}
-              <Popover>
-                <PopoverTrigger asChild>
-                  <button className="relative p-2.5 hover:bg-slate-100 rounded-xl transition-all duration-200 group">
-                    <Bell className="w-5 h-5 text-slate-600 group-hover:text-red-600 transition-colors" />
-                    {unreadCount > 0 && (
-                      <span className="absolute top-0.5 right-0.5 bg-red-600 text-white text-[10px] rounded-full min-w-[18px] h-[18px] flex items-center justify-center font-bold animate-pulse px-1">
-                        {unreadCount > 9 ? '9+' : unreadCount}
-                      </span>
-                    )}
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent className="w-80 sm:w-96 p-0 mr-4 shadow-xl rounded-xl" align="end">
-                  <NotificationCenter
-                    userId={userId}
-                    onNotificationsUpdate={() => {
-                      // TODO: Load notifications from API
-                    }}
-                  />
-                </PopoverContent>
-              </Popover>
-
-              {/* Logout Button (requires confirmation) */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setLogoutConfirmOpen(true)}
-                className="gap-2 border-slate-300 hover:bg-red-50 hover:text-red-600 hover:border-red-300 transition-all duration-200 h-10"
-              >
-                <LogOut className="w-4 h-4" />
-                <span className="hidden sm:inline">Sign out</span>
-              </Button>
-
-              <Dialog open={logoutConfirmOpen} onOpenChange={setLogoutConfirmOpen}>
-                <DialogContent className="sm:max-w-md">
-                  <DialogHeader>
-                    <DialogTitle className="text-destructive">Confirm Sign Out</DialogTitle>
-                  </DialogHeader>
-
-                  <div className="mt-2 text-sm text-muted-foreground">
-                    Are you sure you want to sign out? You will be redirected to the login page.
-                  </div>
-
-                  <DialogFooter className="sm:justify-between mt-4">
-                    <Button type="button" variant="outline" onClick={() => setLogoutConfirmOpen(false)}>
-                      Cancel
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      onClick={() => {
-                        setLogoutConfirmOpen(false)
-                        onLogout()
-                      }}
-                      className="gap-2"
-                    >
-                      Sign out
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-bold text-green-700 bg-green-50 px-1.5 rounded border border-green-100">
+                {user.role || "Employee"}
+              </span>
+              <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-1.5 rounded border border-blue-100">
+                {isLoadingDepartment ? "Loading..." : departmentName}
+              </span>
             </div>
           </div>
         </div>
-      </header>
+      </div>
+
+      {/* Right Side: Metrics & Actions */}
+      <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+        
+        {/* Refined Missed Slots Stat */}
+        {missedSlots > 0 && (
+          <>
+            {/* Desktop Version */}
+            <div className="hidden md:flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-lg pl-3 pr-1 py-1">
+              <div className="text-right">
+                <p className="text-[10px] font-bold text-amber-600 uppercase leading-none">Missed</p>
+                <p className="text-lg font-black text-amber-700 leading-none">{missedSlots}</p>
+              </div>
+              <div className="p-1.5 bg-white rounded shadow-sm text-amber-600">
+                <AlertTriangle className="w-4 h-4" />
+              </div>
+            </div>
+
+            {/* Mobile Version */}
+            <button
+              onClick={() => {
+                setSelectedDate(normalizeDateForComparison(new Date()))
+                showToast.info("Switched to today's view")
+              }}
+              className="md:hidden relative p-2 bg-amber-50 text-amber-600 border border-amber-200 rounded-lg"
+            >
+              <AlertTriangle className="w-5 h-5" />
+              <span className="absolute -top-1 -right-1 bg-amber-600 text-white text-[10px] rounded-full w-5 h-5 flex items-center justify-center font-bold border-2 border-white">
+                {missedSlots}
+              </span>
+            </button>
+          </>
+        )}
+
+        <div className="flex items-center gap-1 border-l border-slate-200 pl-2 sm:pl-4">
+          {/* Notifications */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <button className="relative p-2 text-slate-500 hover:bg-slate-100 rounded-full transition-colors group">
+                <Bell className="w-5 h-5 group-hover:text-red-600" />
+                {unreadCount > 0 && (
+                  <span className="absolute top-1.5 right-1.5 bg-red-600 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center font-bold ring-2 ring-white">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-80 sm:w-96 p-0 mt-2 shadow-xl rounded-xl" align="end">
+              <NotificationCenter userId={userId} onNotificationsUpdate={() => {}} />
+            </PopoverContent>
+          </Popover>
+
+          {/* Sign Out - Kept your original Dialog logic */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setLogoutConfirmOpen(true)}
+            className="text-slate-600 hover:text-red-600 hover:bg-red-50 font-medium transition-all"
+          >
+            <LogOut className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">Sign out</span>
+          </Button>
+        </div>
+
+        {/* Your Original Dialog Implementation */}
+        <Dialog open={logoutConfirmOpen} onOpenChange={setLogoutConfirmOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="text-destructive">Confirm Sign Out</DialogTitle>
+            </DialogHeader>
+            <div className="mt-2 text-sm text-muted-foreground">
+              Are you sure you want to sign out? You will be redirected to the login page.
+            </div>
+            <DialogFooter className="sm:justify-between mt-4">
+              <Button type="button" variant="outline" onClick={() => setLogoutConfirmOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={() => {
+                  setLogoutConfirmOpen(false)
+                  onLogout()
+                }}
+                className="gap-2"
+              >
+                Sign out
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </div>
+  </div>
+</header>
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">

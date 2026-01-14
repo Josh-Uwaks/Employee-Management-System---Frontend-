@@ -1349,6 +1349,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
           userName={userName}
           userRole={authUser?.role}
           stats={stats}
+          activitiesStats={activitiesStats}
           departmentsCount={displayDepartments.length}
           availableViews={availableViews}
           onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}

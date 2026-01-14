@@ -12,6 +12,17 @@ import {
   Building2, MapPin as MapIcon, Eye, AlertCircle
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import {
+  AlertDialog,
+  AlertDialogTrigger,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from "@/components/ui/alert-dialog"
 
 interface EmployeeManagementProps {
   employees: Employee[]
@@ -393,21 +404,39 @@ export default function EmployeeManagement({
                             Edit
                           </Button>
                           
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
-                            className={cn(
-                              "gap-2 transition-all",
-                              emp.is_active 
-                                ? "border-amber-200 text-amber-700 hover:bg-amber-50 hover:text-amber-800 hover:border-amber-300" 
-                                : "border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 hover:border-emerald-300"
-                            )}
-                            onClick={() => onStatusToggle(emp)}
-                            disabled={isActionLoading}
-                          >
-                            {emp.is_active ? <XCircle size={14} /> : <CheckCircle size={14} />}
-                            {emp.is_active ? "Disable" : "Enable"}
-                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                className={cn(
+                                  "gap-2 transition-all",
+                                  emp.is_active 
+                                    ? "border-amber-200 text-amber-700 hover:bg-amber-50 hover:text-amber-800 hover:border-amber-300" 
+                                    : "border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 hover:border-emerald-300"
+                                )}
+                                disabled={isActionLoading}
+                              >
+                                {emp.is_active ? <XCircle size={14} /> : <CheckCircle size={14} />}
+                                {emp.is_active ? "Disable" : "Enable"}
+                              </Button>
+                            </AlertDialogTrigger>
+
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>{emp.is_active ? "Disable User" : "Enable User"}</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  Are you sure you want to {emp.is_active ? "disable" : "enable"} {emp.first_name} {emp.last_name}?
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => onStatusToggle(emp)}>
+                                  {emp.is_active ? "Disable" : "Enable"}
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
                           
                           <Button 
                             variant="outline" 

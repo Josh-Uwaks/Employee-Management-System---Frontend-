@@ -26,6 +26,17 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
+import {
+  AlertDialog,
+  AlertDialogTrigger,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from "@/components/ui/alert-dialog"
 
 interface DepartmentManagementProps {
   departments: Department[]
@@ -331,20 +342,38 @@ export default function DepartmentManagement({
                   )}
                   
                   {canEditDepartments && onToggleStatus && (
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      className={cn(
-                        "gap-2 transition-all",
-                        dept.isActive 
-                          ? "border-amber-200 text-amber-700 hover:bg-amber-50 hover:text-amber-800 hover:border-amber-300" 
-                          : "border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 hover:border-emerald-300"
-                      )}
-                      onClick={() => onToggleStatus(dept._id)}
-                      disabled={isActionLoading}
-                    >
-                      {dept.isActive ? "Disable" : "Enable"}
-                    </Button>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className={cn(
+                            "gap-2 transition-all",
+                            dept.isActive 
+                              ? "border-amber-200 text-amber-700 hover:bg-amber-50 hover:text-amber-800 hover:border-amber-300" 
+                              : "border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 hover:border-emerald-300"
+                          )}
+                          disabled={isActionLoading}
+                        >
+                          {dept.isActive ? "Disable" : "Enable"}
+                        </Button>
+                      </AlertDialogTrigger>
+
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>{dept.isActive ? "Disable Department" : "Enable Department"}</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Are you sure you want to {dept.isActive ? "disable" : "enable"} the department "{dept.name}"?
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction onClick={() => onToggleStatus(dept._id)}>
+                            {dept.isActive ? "Disable" : "Enable"}
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   )}
                   
                   <DropdownMenu>
